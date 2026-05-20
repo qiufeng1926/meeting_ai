@@ -1,6 +1,7 @@
 import json
 import uuid
 import os
+import time
 from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from utils.logger import get_logger
@@ -25,12 +26,12 @@ class ConnectionManager:
     async def connect(self, websocket: WebSocket, connection_id: str):
         await websocket.accept()
         self.active_connections[connection_id] = websocket
-        logger.info(f"WebSocket 连接建立: {connection_id}")
+        logger.info(f"WebSocket 连接建立", extra={'request_id': connection_id, 'output_params': {'connection_id': connection_id}})
     
     def disconnect(self, connection_id: str):
         if connection_id in self.active_connections:
             del self.active_connections[connection_id]
-            logger.info(f"WebSocket 连接断开: {connection_id}")
+            logger.info(f"WebSocket 连接断开", extra={'request_id': connection_id})
     
     async def send_json(self, connection_id: str, data: dict):
         if connection_id in self.active_connections:
@@ -46,6 +47,7 @@ async def websocket_transcribe(websocket: WebSocket):
     WebSocket 实时语音转文本
     客户端发送音频数据块，服务端返回识别结果
     """
+    start_time = time.time()
     connection_id = str(uuid.uuid4())
     await manager.connect(websocket, connection_id)
     
@@ -55,10 +57,11 @@ async def websocket_transcribe(websocket: WebSocket):
         "start_time": datetime.now().isoformat(),
         "total_text": "",
         "file_id": None,
-        "meeting_name": None
+        "meeting_name": None,
+        "audio_chunks": 0
     }
     
-    logger.info(f"开始实时语音转写会话: {connection_id}")
+    logger.info(f"开始实时语音转写会话", extra={'request_id': connection_id, 'input_params': {'connection_id': connection_id}})
     
     try:
         while True:
@@ -78,12 +81,13 @@ async def websocket_transcribe(websocket: WebSocket):
                     meeting_name = message.get("meeting_name", "")
                     if meeting_name:
                         session_info["meeting_name"] = meeting_name
-                        logger.info(f"设置会议名称: {meeting_name}")
+                        logger.info(f"设置会议名称", extra={'request_id': connection_id, 'input_params': {'meeting_name': meeting_name}})
                     continue
                 
                 if message.get("type") == "audio":
                     audio_bytes = bytes(message.get("data", []))
                     sample_rate = message.get("sample_rate", 16000)
+                    session_info["audio_chunks"] += 1
                     
                     # 进行语音识别
                     text = asr_engine.transcribe_stream(audio_bytes, sample_rate)
@@ -102,7 +106,8 @@ async def websocket_transcribe(websocket: WebSocket):
                         
                 elif message.get("type") == "end":
                     # 会话结束，生成 AI 总结
-                    logger.info(f"会话结束，开始生成 AI 总结: {connection_id}")
+                    duration_ms = (time.time() - start_time) * 1000
+                    logger.info(f"会话结束，开始生成 AI 总结", extra={'request_id': connection_id, 'output_params': {'duration_ms': round(duration_ms, 2), 'total_text_length': len(session_info["total_text"]), 'audio_chunks': session_info["audio_chunks"]}})
                     
                     # 保存转写文本
                     file_id = str(uuid.uuid4())
@@ -127,7 +132,7 @@ async def websocket_transcribe(websocket: WebSocket):
                     )
                     with open(transcript_path, "w", encoding="utf-8") as f:
                         f.write(session_info["total_text"])
-                    logger.info(f"实时转写文本已保存: {transcript_path}")
+                    logger.info(f"实时转写文本已保存", extra={'request_id': connection_id, 'output_params': {'transcript_file': transcript_path, 'text_length': len(session_info["total_text"])}})
                     
                     # 发送正在生成总结的消息
                     await manager.send_json(connection_id, {
@@ -146,7 +151,9 @@ async def websocket_transcribe(websocket: WebSocket):
                         )
                         with open(summary_path, "w", encoding="utf-8") as f:
                             f.write(summary)
-                        logger.info(f"实时会议纪要已保存: {summary_path}")
+                        
+                        total_duration_ms = (time.time() - start_time) * 1000
+                        logger.info(f"实时会议纪要已保存", extra={'request_id': connection_id, 'output_params': {'summary_file': summary_path, 'summary_length': len(summary), 'total_duration_ms': round(total_duration_ms, 2)}})
                         
                         # 发送最终结果
                         end_result = {
@@ -161,7 +168,8 @@ async def websocket_transcribe(websocket: WebSocket):
                         await manager.send_json(connection_id, end_result)
                         
                     except Exception as e:
-                        logger.error(f"生成 AI 总结失败: {e}", exc_info=True)
+                        total_duration_ms = (time.time() - start_time) * 1000
+                        logger.error(f"生成 AI 总结失败", exc_info=True, extra={'request_id': connection_id, 'output_params': {'error': str(e), 'error_type': type(e).__name__, 'duration_ms': round(total_duration_ms, 2)}})
                         end_result = {
                             "type": "session_end",
                             "total_text": session_info["total_text"],
@@ -198,12 +206,14 @@ async def websocket_transcribe(websocket: WebSocket):
                     await manager.send_json(connection_id, error_msg)
     
     except WebSocketDisconnect:
-        logger.info(f"WebSocket 断开连接: {connection_id}")
+        duration_ms = (time.time() - start_time) * 1000
+        logger.info(f"WebSocket 断开连接", extra={'request_id': connection_id, 'output_params': {'duration_ms': round(duration_ms, 2), 'total_text_length': len(session_info["total_text"]), 'audio_chunks': session_info["audio_chunks"]}})
     except Exception as e:
-        logger.error(f"WebSocket 错误: {e}", exc_info=True)
+        duration_ms = (time.time() - start_time) * 1000
+        logger.error(f"WebSocket 错误", exc_info=True, extra={'request_id': connection_id, 'output_params': {'error': str(e), 'error_type': type(e).__name__, 'duration_ms': round(duration_ms, 2)}})
     finally:
         manager.disconnect(connection_id)
-        logger.info(f"会话清理完成: {connection_id}")
+        logger.info(f"会话清理完成", extra={'request_id': connection_id})
 
 
 @router.get("/ws/status")
@@ -218,6 +228,11 @@ async def websocket_status():
 @router.get("/meetings/list")
 async def list_meetings():
     """获取已保存的会议列表"""
+    start_time = time.time()
+    request_id = str(uuid.uuid4())
+    
+    logger.info(f"获取会议列表请求", extra={'request_id': request_id})
+    
     try:
         transcripts_dir = os.path.join(output_dir, "transcripts")
         summaries_dir = os.path.join(output_dir, "summaries")
@@ -255,6 +270,14 @@ async def list_meetings():
                         "summary_file": summary_path if has_summary else None
                     })
         
+        duration_ms = (time.time() - start_time) * 1000
+        output_params = {
+            "success": True,
+            "total": len(meetings),
+            "duration_ms": round(duration_ms, 2)
+        }
+        logger.info(f"获取会议列表成功", extra={'request_id': request_id, 'output_params': output_params, 'duration_ms': duration_ms})
+        
         return {
             "success": True,
             "total": len(meetings),
@@ -262,7 +285,9 @@ async def list_meetings():
         }
         
     except Exception as e:
-        logger.error(f"获取会议列表失败: {e}", exc_info=True)
+        duration_ms = (time.time() - start_time) * 1000
+        error_params = {"error": str(e), "error_type": type(e).__name__, "duration_ms": round(duration_ms, 2)}
+        logger.error(f"获取会议列表失败", exc_info=True, extra={'request_id': request_id, 'output_params': error_params, 'duration_ms': duration_ms})
         return {
             "success": False,
             "error": str(e)
@@ -272,6 +297,12 @@ async def list_meetings():
 @router.get("/meetings/{file_id}")
 async def get_meeting(file_id: str):
     """获取指定会议的详细内容"""
+    start_time = time.time()
+    request_id = str(uuid.uuid4())
+    
+    input_params = {"file_id": file_id}
+    logger.info(f"获取会议详情请求", extra={'request_id': request_id, 'input_params': input_params})
+    
     try:
         transcripts_dir = os.path.join(output_dir, "transcripts")
         summaries_dir = os.path.join(output_dir, "summaries")
@@ -290,6 +321,9 @@ async def get_meeting(file_id: str):
                 break
         
         if not transcript_file:
+            duration_ms = (time.time() - start_time) * 1000
+            error_params = {"error": "会议不存在", "duration_ms": round(duration_ms, 2)}
+            logger.warning(f"会议不存在", extra={'request_id': request_id, 'input_params': input_params, 'output_params': error_params, 'duration_ms': duration_ms})
             return {
                 "success": False,
                 "error": "会议不存在"
@@ -304,6 +338,17 @@ async def get_meeting(file_id: str):
             with open(summary_file, 'r', encoding='utf-8') as f:
                 summary = f.read()
         
+        duration_ms = (time.time() - start_time) * 1000
+        output_params = {
+            "success": True,
+            "file_id": file_id,
+            "transcript_length": len(transcript),
+            "has_summary": summary is not None,
+            "summary_length": len(summary) if summary else 0,
+            "duration_ms": round(duration_ms, 2)
+        }
+        logger.info(f"获取会议详情成功", extra={'request_id': request_id, 'input_params': input_params, 'output_params': output_params, 'duration_ms': duration_ms})
+        
         return {
             "success": True,
             "file_id": file_id,
@@ -314,7 +359,9 @@ async def get_meeting(file_id: str):
         }
         
     except Exception as e:
-        logger.error(f"获取会议详情失败: {e}", exc_info=True)
+        duration_ms = (time.time() - start_time) * 1000
+        error_params = {"error": str(e), "error_type": type(e).__name__, "duration_ms": round(duration_ms, 2)}
+        logger.error(f"获取会议详情失败", exc_info=True, extra={'request_id': request_id, 'input_params': input_params, 'output_params': error_params, 'duration_ms': duration_ms})
         return {
             "success": False,
             "error": str(e)
