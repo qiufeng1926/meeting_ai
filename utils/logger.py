@@ -43,12 +43,45 @@ class JsonLineFormatter(logging.Formatter):
             "process": record.process,
         }
         
+        # 添加自定义字段（如果存在）
+        if hasattr(record, 'request_id'):
+            payload["request_id"] = record.request_id
+        if hasattr(record, 'user_id'):
+            payload["user_id"] = record.user_id
+        if hasattr(record, 'input_params'):
+            payload["input_params"] = self._sanitize_data(record.input_params)
+        if hasattr(record, 'output_params'):
+            payload["output_params"] = self._sanitize_data(record.output_params)
+        if hasattr(record, 'duration_ms'):
+            payload["duration_ms"] = record.duration_ms
+        if hasattr(record, 'status_code'):
+            payload["status_code"] = record.status_code
+        
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info).rstrip()
         if record.stack_info:
             payload["stack"] = self.formatStack(record.stack_info).rstrip()
         
         return json.dumps(payload, ensure_ascii=False, default=str)
+    
+    def _sanitize_data(self, data) -> any:
+        """清理敏感数据，防止日志泄露密码等敏感信息"""
+        if isinstance(data, dict):
+            sanitized = {}
+            for key, value in data.items():
+                # 跳过敏感字段
+                if key.lower() in ['password', 'token', 'api_key', 'secret', 'authorization']:
+                    sanitized[key] = '***REDACTED***'
+                else:
+                    sanitized[key] = self._sanitize_data(value)
+            return sanitized
+        elif isinstance(data, (list, tuple)):
+            return [self._sanitize_data(item) for item in data]
+        elif isinstance(data, (str, int, float, bool, type(None))):
+            return data
+        else:
+            # 其他类型转换为字符串
+            return str(data)
 
 
 class TimestampSizeRotatingHandler(logging.Handler):
@@ -250,3 +283,101 @@ def get_logger(name: str | None = None) -> logging.Logger:
         setup_logging(logger_name=_DEFAULT_LOGGER_NAME)
     key = name or _DEFAULT_LOGGER_NAME
     return logging.getLogger(key)
+
+
+def log_request(
+    logger: logging.Logger,
+    message: str,
+    request_id: str = None,
+    input_params: dict = None,
+    level: int = logging.INFO,
+    **kwargs
+):
+    """
+    记录请求日志
+    
+    Args:
+        logger: 日志器实例
+        message: 日志消息
+        request_id: 请求 ID
+        input_params: 输入参数字典
+        level: 日志级别
+        **kwargs: 其他额外字段
+    """
+    extra = {'input_params': input_params, **kwargs}
+    if request_id:
+        extra['request_id'] = request_id
+    logger.log(level, message, extra=extra)
+
+
+def log_response(
+    logger: logging.Logger,
+    message: str,
+    request_id: str = None,
+    output_params: dict = None,
+    duration_ms: float = None,
+    status_code: int = None,
+    level: int = logging.INFO,
+    **kwargs
+):
+    """
+    记录响应日志
+    
+    Args:
+        logger: 日志器实例
+        message: 日志消息
+        request_id: 请求 ID
+        output_params: 输出参数字典
+        duration_ms: 处理耗时（毫秒）
+        status_code: 状态码
+        level: 日志级别
+        **kwargs: 其他额外字段
+    """
+    extra = {'output_params': output_params, **kwargs}
+    if request_id:
+        extra['request_id'] = request_id
+    if duration_ms is not None:
+        extra['duration_ms'] = duration_ms
+    if status_code is not None:
+        extra['status_code'] = status_code
+    logger.log(level, message, extra=extra)
+
+
+def log_api_call(
+    logger: logging.Logger,
+    api_name: str,
+    request_id: str = None,
+    input_params: dict = None,
+    output_params: dict = None,
+    duration_ms: float = None,
+    status_code: int = None,
+    error: Exception = None,
+):
+    """
+    记录完整的 API 调用日志（包含请求和响应）
+    
+    Args:
+        logger: 日志器实例
+        api_name: API 名称
+        request_id: 请求 ID
+        input_params: 输入参数
+        output_params: 输出参数
+        duration_ms: 处理耗时（毫秒）
+        status_code: 状态码
+        error: 异常对象（如果有）
+    """
+    extra = {
+        'input_params': input_params,
+        'output_params': output_params,
+    }
+    if request_id:
+        extra['request_id'] = request_id
+    if duration_ms is not None:
+        extra['duration_ms'] = duration_ms
+    if status_code is not None:
+        extra['status_code'] = status_code
+    
+    if error:
+        logger.error(f"API 调用失败: {api_name}", exc_info=error, extra=extra)
+    else:
+        logger.info(f"API 调用成功: {api_name}", extra=extra)
