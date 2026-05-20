@@ -1,7 +1,9 @@
 import os
 import uuid
 import time
+import asyncio
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import (
     APIRouter,
@@ -13,7 +15,7 @@ from fastapi import (
 from config.config import upload_dir, output_dir
 from asr.engine import FunASREngine
 from llm.glm_chat import GLMClient
-from utils.logger import get_logger, log_api_call
+from utils.logger import get_logger
 
 router = APIRouter()
 logger = get_logger("meeting_route")
@@ -33,6 +35,9 @@ async def upload_meeting_audio(
     file: UploadFile = File(...),
     meeting_name: str = Form(None)
 ):
+    """
+    异步批量上传音频文件并处理
+    """
     start_time = time.time()
     request_id = str(uuid.uuid4())
     
@@ -40,17 +45,23 @@ async def upload_meeting_audio(
     input_params = {
         "filename": file.filename,
         "content_type": file.content_type,
+        "file_size": None,  # 稍后填充
         "meeting_name": meeting_name,
     }
     
-    logger.info(f"[{request_id}] 收到音频文件上传请求", extra={'input_params': input_params, 'request_id': request_id})
+    logger.info(f"收到音频文件上传请求", extra={'request_id': request_id, 'input_params': input_params})
     
     try:
+        # 读取文件内容
+        content = await file.read()
+        input_params["file_size"] = len(content)
+        
         # 处理会议名称
         if meeting_name:
             safe_name = "".join(c for c in meeting_name if c.isalnum() or c in (' ', '-', '_')).strip()
             safe_name = safe_name.replace(' ', '_')
             name_prefix = f"{safe_name}_"
+            logger.info(f"设置会议名称", extra={'request_id': request_id, 'input_params': {'meeting_name': meeting_name, 'safe_name': safe_name}})
         else:
             name_prefix = ""
 
@@ -59,39 +70,51 @@ async def upload_meeting_audio(
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         ext = file.filename.split(".")[-1]
 
-        # 保存上传的音频文件
+        # 异步保存上传的音频文件
         save_path = os.path.join(upload_dir, f"{file_id}.{ext}")
-        with open(save_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
-        logger.info(f"[{request_id}] 音频文件已保存: {save_path}", extra={'request_id': request_id})
+        await _save_file_async(save_path, content)
+        logger.info(f"音频文件已保存", extra={'request_id': request_id, 'output_params': {'save_path': save_path, 'file_size': len(content)}})
 
-        # ASR 语音转文字
-        logger.info(f"[{request_id}] 开始语音识别...", extra={'request_id': request_id})
-        transcript = asr_engine.transcribe(save_path)
-        logger.info(f"[{request_id}] 语音识别完成，文本长度: {len(transcript)} 字符", extra={'request_id': request_id})
+        # 异步 ASR 语音转文字
+        logger.info(f"开始语音识别...", extra={'request_id': request_id})
+        asr_start = time.time()
+        transcript = await asr_engine.transcribe_async(save_path)
+        asr_duration = (time.time() - asr_start) * 1000
+        logger.info(f"语音识别完成", extra={
+            'request_id': request_id, 
+            'output_params': {
+                'transcript_length': len(transcript),
+                'asr_duration_ms': round(asr_duration, 2)
+            }
+        })
 
-        # 保存转写文本
+        # 异步保存转写文本
         transcript_path = os.path.join(output_dir, "transcripts", f"{name_prefix}{file_id}_{timestamp}.txt")
-        with open(transcript_path, "w", encoding="utf-8") as f:
-            f.write(transcript)
-        logger.info(f"[{request_id}] 转写文本已保存: {transcript_path}", extra={'request_id': request_id})
+        await _save_text_async(transcript_path, transcript)
+        logger.info(f"转写文本已保存", extra={'request_id': request_id, 'output_params': {'transcript_file': transcript_path}})
 
-        # AI 总结会议纪要
-        logger.info(f"[{request_id}] 开始生成会议纪要...", extra={'request_id': request_id})
-        summary = glm.summary_meeting(transcript)
-        logger.info(f"[{request_id}] 会议纪要生成完成，长度: {len(summary)} 字符", extra={'request_id': request_id})
+        # 异步 AI 总结会议纪要
+        logger.info(f"开始生成会议纪要...", extra={'request_id': request_id})
+        llm_start = time.time()
+        summary = await glm.summary_meeting_async(transcript)
+        llm_duration = (time.time() - llm_start) * 1000
+        logger.info(f"会议纪要生成完成", extra={
+            'request_id': request_id,
+            'output_params': {
+                'summary_length': len(summary),
+                'llm_duration_ms': round(llm_duration, 2)
+            }
+        })
 
-        # 保存会议纪要
+        # 异步保存会议纪要
         summary_path = os.path.join(output_dir, "summaries", f"{name_prefix}{file_id}_{timestamp}.md")
-        with open(summary_path, "w", encoding="utf-8") as f:
-            f.write(summary)
-        logger.info(f"[{request_id}] 会议纪要已保存: {summary_path}", extra={'request_id': request_id})
+        await _save_text_async(summary_path, summary)
+        logger.info(f"会议纪要已保存", extra={'request_id': request_id, 'output_params': {'summary_file': summary_path}})
 
-        # 计算耗时
-        duration_ms = (time.time() - start_time) * 1000
+        # 计算总耗时
+        total_duration_ms = (time.time() - start_time) * 1000
         
-        # 准备输出参数（不包含完整文本，避免日志过大）
+        # 准备输出参数
         output_params = {
             "success": True,
             "file_id": file_id,
@@ -99,10 +122,12 @@ async def upload_meeting_audio(
             "summary_length": len(summary),
             "transcript_file": transcript_path,
             "summary_file": summary_path,
-            "duration_ms": round(duration_ms, 2)
+            "total_duration_ms": round(total_duration_ms, 2),
+            "asr_duration_ms": round(asr_duration, 2),
+            "llm_duration_ms": round(llm_duration, 2)
         }
         
-        logger.info(f"[{request_id}] 会议处理完成", extra={'output_params': output_params, 'request_id': request_id, 'duration_ms': duration_ms})
+        logger.info(f"会议处理完成", extra={'request_id': request_id, 'input_params': input_params, 'output_params': output_params, 'duration_ms': total_duration_ms})
         
         return {
             "success": True,
@@ -115,14 +140,26 @@ async def upload_meeting_audio(
         }
         
     except Exception as e:
-        duration_ms = (time.time() - start_time) * 1000
+        total_duration_ms = (time.time() - start_time) * 1000
         error_params = {
             "error": str(e),
             "error_type": type(e).__name__,
-            "duration_ms": round(duration_ms, 2)
+            "duration_ms": round(total_duration_ms, 2)
         }
-        logger.error(f"[{request_id}] 会议处理失败", exc_info=True, extra={'input_params': input_params, 'output_params': error_params, 'request_id': request_id, 'duration_ms': duration_ms})
+        logger.error(f"会议处理失败", exc_info=True, extra={'request_id': request_id, 'input_params': input_params, 'output_params': error_params, 'duration_ms': total_duration_ms})
         return {
             "success": False,
             "error": f"处理失败: {str(e)}"
         }
+
+
+async def _save_file_async(file_path: str, content: bytes):
+    """异步保存文件"""
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, lambda: Path(file_path).write_bytes(content))
+
+
+async def _save_text_async(file_path: str, text: str):
+    """异步保存文本文件"""
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, lambda: Path(file_path).write_text(text, encoding='utf-8'))

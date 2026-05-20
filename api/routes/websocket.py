@@ -2,6 +2,8 @@ import json
 import uuid
 import os
 import time
+import asyncio
+from pathlib import Path
 from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from utils.logger import get_logger
@@ -89,8 +91,8 @@ async def websocket_transcribe(websocket: WebSocket):
                     sample_rate = message.get("sample_rate", 16000)
                     session_info["audio_chunks"] += 1
                     
-                    # 进行语音识别
-                    text = asr_engine.transcribe_stream(audio_bytes, sample_rate)
+                    # 异步进行语音识别
+                    text = await asr_engine.transcribe_stream_async(audio_bytes, sample_rate)
                     
                     if text:
                         session_info["total_text"] += text
@@ -126,12 +128,12 @@ async def websocket_transcribe(websocket: WebSocket):
                         transcript_filename = f"{file_id}_{timestamp}_realtime.txt"
                         summary_filename = f"{file_id}_{timestamp}_realtime.md"
                     
+                    # 异步保存转写文本
                     transcript_path = os.path.join(
                         output_dir, "transcripts",
                         transcript_filename
                     )
-                    with open(transcript_path, "w", encoding="utf-8") as f:
-                        f.write(session_info["total_text"])
+                    await _save_text_async(transcript_path, session_info["total_text"])
                     logger.info(f"实时转写文本已保存", extra={'request_id': connection_id, 'output_params': {'transcript_file': transcript_path, 'text_length': len(session_info["total_text"])}})
                     
                     # 发送正在生成总结的消息
@@ -140,17 +142,16 @@ async def websocket_transcribe(websocket: WebSocket):
                         "message": "正在生成 AI 会议纪要..."
                     })
                     
-                    # 生成 AI 总结
+                    # 异步生成 AI 总结
                     try:
-                        summary = glm_client.summary_meeting(session_info["total_text"])
+                        summary = await glm_client.summary_meeting_async(session_info["total_text"])
                         
-                        # 保存会议纪要
+                        # 异步保存会议纪要
                         summary_path = os.path.join(
                             output_dir, "summaries",
                             summary_filename
                         )
-                        with open(summary_path, "w", encoding="utf-8") as f:
-                            f.write(summary)
+                        await _save_text_async(summary_path, summary)
                         
                         total_duration_ms = (time.time() - start_time) * 1000
                         logger.info(f"实时会议纪要已保存", extra={'request_id': connection_id, 'output_params': {'summary_file': summary_path, 'summary_length': len(summary), 'total_duration_ms': round(total_duration_ms, 2)}})
@@ -366,3 +367,9 @@ async def get_meeting(file_id: str):
             "success": False,
             "error": str(e)
         }
+
+
+async def _save_text_async(file_path: str, text: str):
+    """异步保存文本文件"""
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, lambda: Path(file_path).write_text(text, encoding='utf-8'))

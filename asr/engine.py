@@ -1,8 +1,13 @@
 import os
+import asyncio
 from pathlib import Path
 from funasr import AutoModel
 import numpy as np
 import io
+from concurrent.futures import ThreadPoolExecutor
+from utils.logger import get_logger
+
+logger = get_logger("asr_engine")
 
 
 class FunASREngine:
@@ -25,6 +30,9 @@ class FunASREngine:
             device=device,
             disable_update=True,
         )
+        
+        # 创建线程池用于异步执行
+        self.executor = ThreadPoolExecutor(max_workers=4)
 
     def transcribe(self, audio_path: str) -> str:
         """
@@ -32,7 +40,7 @@ class FunASREngine:
         """
 
         audio_path = str(Path(audio_path).resolve())
-        print(f"[INFO] 音频文件：{audio_path}")
+        logger.info(f"开始转录音频文件: {audio_path}")
 
         result = self.model.generate(
             input=audio_path,
@@ -45,6 +53,13 @@ class FunASREngine:
         text = text.replace(" ", "")
 
         return text
+    
+    async def transcribe_async(self, audio_path: str) -> str:
+        """
+        异步音频转文字（批量模式）
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.executor, self.transcribe, audio_path)
 
     def transcribe_stream(self, audio_data: bytes, sample_rate: int = 16000) -> str:
         """
@@ -72,17 +87,24 @@ class FunASREngine:
                 return text.replace(" ", "")
             return ""
         except Exception as e:
-            print(f"[ERROR] 流式识别失败: {e}")
+            logger.error(f"流式识别失败: {e}", exc_info=True)
             return ""
+    
+    async def transcribe_stream_async(self, audio_data: bytes, sample_rate: int = 16000) -> str:
+        """
+        异步流式音频转文字
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.executor, self.transcribe_stream, audio_data, sample_rate)
 
 
 if __name__ == "__main__":
-
+    logger_main = get_logger("asr_test")
     engine = FunASREngine()
 
     text = engine.transcribe(
         r"./example/asr_example.wav"
     )
 
-    print("\n========== ASR RESULT ==========\n")
-    print(text)
+    logger_main.info("\n========== ASR RESULT ==========\n")
+    logger_main.info(text)
