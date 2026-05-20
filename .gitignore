@@ -2,3 +2,4 @@ logs/*
 output/summaries/*
 output/transcripts/*
 upload/*
+./.env
