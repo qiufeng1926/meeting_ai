@@ -277,12 +277,16 @@ def setup_logging(
 
 
 def get_logger(name: str | None = None) -> logging.Logger:
-    """获取日志器；首次使用时先初始化默认 meeting_ai（含文件 Handler），子 logger 向其传播。"""
+    """获取日志器；首次使用时先初始化 meeting_ai（含文件 Handler）。
+
+    子模块使用 ``meeting_ai.<name>`` 层级命名，使日志向上传播到 meeting_ai 的 Handler。
+    """
     base = logging.getLogger(_DEFAULT_LOGGER_NAME)
     if not base.handlers:
         setup_logging(logger_name=_DEFAULT_LOGGER_NAME)
-    key = name or _DEFAULT_LOGGER_NAME
-    return logging.getLogger(key)
+    if not name or name == _DEFAULT_LOGGER_NAME:
+        return base
+    return logging.getLogger(f"{_DEFAULT_LOGGER_NAME}.{name}")
 
 
 def log_request(
