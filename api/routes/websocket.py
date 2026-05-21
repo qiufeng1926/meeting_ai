@@ -35,9 +35,19 @@ class ConnectionManager:
             del self.active_connections[connection_id]
             logger.info(f"WebSocket 连接断开", extra={'request_id': connection_id})
     
-    async def send_json(self, connection_id: str, data: dict):
-        if connection_id in self.active_connections:
-            await self.active_connections[connection_id].send_json(data)
+    async def send_json(self, connection_id: str, data: dict) -> bool:
+        ws = self.active_connections.get(connection_id)
+        if ws is None:
+            return False
+        try:
+            await ws.send_json(data)
+            return True
+        except WebSocketDisconnect:
+            self.disconnect(connection_id)
+            return False
+        except RuntimeError:
+            self.disconnect(connection_id)
+            return False
 
 
 manager = ConnectionManager()
@@ -107,15 +117,14 @@ async def websocket_transcribe(websocket: WebSocket):
                     
                     if text:
                         session_info["total_text"] += text
-                        
-                        # 发送识别结果
                         result = {
                             "type": "result",
                             "text": text,
                             "total_text": session_info["total_text"],
-                            "timestamp": datetime.now().isoformat()
+                            "timestamp": datetime.now().isoformat(),
                         }
-                        await manager.send_json(connection_id, result)
+                        if not await manager.send_json(connection_id, result):
+                            raise WebSocketDisconnect()
                         
                 elif message.get("type") == "end":
                     # 冲刷缓冲区中剩余音频
@@ -160,51 +169,81 @@ async def websocket_transcribe(websocket: WebSocket):
                     await _save_text_async(transcript_path, session_info["total_text"])
                     logger.info(f"实时转写文本已保存", extra={'request_id': connection_id, 'output_params': {'transcript_file': transcript_path, 'text_length': len(session_info["total_text"])}})
                     
+                    end_result_base = {
+                        "total_text": session_info["total_text"],
+                        "file_id": file_id,
+                        "transcript_file": transcript_path,
+                        "duration": str(
+                            datetime.now()
+                            - datetime.fromisoformat(session_info["start_time"])
+                        ),
+                    }
+
                     # 发送正在生成总结的消息
-                    await manager.send_json(connection_id, {
+                    if not await manager.send_json(connection_id, {
                         "type": "generating_summary",
-                        "message": "正在生成 AI 会议纪要..."
-                    })
-                    
+                        "message": "正在生成 AI 会议纪要...",
+                    }):
+                        logger.info(
+                            "客户端已断开，跳过 AI 总结推送",
+                            extra={"request_id": connection_id},
+                        )
+                        break
+
                     # 异步生成 AI 总结
                     try:
-                        summary = await glm_client.summary_meeting_async(session_info["total_text"])
-                        
-                        # 异步保存会议纪要
+                        summary = await glm_client.summary_meeting_async(
+                            session_info["total_text"]
+                        )
+
                         summary_path = os.path.join(
-                            output_dir, "summaries",
-                            summary_filename
+                            output_dir, "summaries", summary_filename
                         )
                         await _save_text_async(summary_path, summary)
-                        
+
                         total_duration_ms = (time.time() - start_time) * 1000
-                        logger.info(f"实时会议纪要已保存", extra={'request_id': connection_id, 'output_params': {'summary_file': summary_path, 'summary_length': len(summary), 'total_duration_ms': round(total_duration_ms, 2)}})
-                        
-                        # 发送最终结果
+                        logger.info(
+                            "实时会议纪要已保存",
+                            extra={
+                                "request_id": connection_id,
+                                "output_params": {
+                                    "summary_file": summary_path,
+                                    "summary_length": len(summary),
+                                    "total_duration_ms": round(total_duration_ms, 2),
+                                },
+                            },
+                        )
+
                         end_result = {
                             "type": "session_end",
-                            "total_text": session_info["total_text"],
                             "summary": summary,
-                            "file_id": file_id,
-                            "transcript_file": transcript_path,
                             "summary_file": summary_path,
-                            "duration": str(datetime.now() - datetime.fromisoformat(session_info["start_time"]))
+                            **end_result_base,
                         }
                         await manager.send_json(connection_id, end_result)
-                        
+
                     except Exception as e:
                         total_duration_ms = (time.time() - start_time) * 1000
-                        logger.error(f"生成 AI 总结失败", exc_info=True, extra={'request_id': connection_id, 'output_params': {'error': str(e), 'error_type': type(e).__name__, 'duration_ms': round(total_duration_ms, 2)}})
+                        logger.error(
+                            "生成 AI 总结失败",
+                            exc_info=True,
+                            extra={
+                                "request_id": connection_id,
+                                "output_params": {
+                                    "error": str(e),
+                                    "error_type": type(e).__name__,
+                                    "duration_ms": round(total_duration_ms, 2),
+                                },
+                            },
+                        )
                         end_result = {
                             "type": "session_end",
-                            "total_text": session_info["total_text"],
                             "summary": None,
                             "error": f"生成总结失败: {str(e)}",
-                            "file_id": file_id,
-                            "duration": str(datetime.now() - datetime.fromisoformat(session_info["start_time"]))
+                            **end_result_base,
                         }
                         await manager.send_json(connection_id, end_result)
-                    
+
                     break
                     
             except (json.JSONDecodeError, UnicodeDecodeError):
@@ -231,6 +270,11 @@ async def websocket_transcribe(websocket: WebSocket):
     except WebSocketDisconnect:
         duration_ms = (time.time() - start_time) * 1000
         logger.info(f"WebSocket 断开连接", extra={'request_id': connection_id, 'output_params': {'duration_ms': round(duration_ms, 2), 'total_text_length': len(session_info["total_text"]), 'audio_chunks': session_info["audio_chunks"]}})
+    except RuntimeError as e:
+        if "close message" in str(e).lower():
+            logger.info(f"WebSocket 已关闭", extra={'request_id': connection_id})
+        else:
+            raise
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
         logger.error(f"WebSocket 错误", exc_info=True, extra={'request_id': connection_id, 'output_params': {'error': str(e), 'error_type': type(e).__name__, 'duration_ms': round(duration_ms, 2)}})

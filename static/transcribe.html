@@ -446,6 +446,7 @@
         let mediaRecorder = null;
         let audioContext = null;
         let isRecording = false;
+        let sessionEnding = false;
         let selectedFile = null;
         
         const statusEl = document.getElementById('status');
@@ -512,10 +513,41 @@
             ws.onclose = () => {
                 console.log('WebSocket 连接关闭');
                 updateStatus('已断开', false);
-                if (isRecording) {
-                    stopRecording();
-                }
+                sessionEnding = false;
+                cleanupMediaOnly();
             };
+        }
+
+        function cleanupMediaOnly() {
+            if (!mediaRecorder) return;
+            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            try {
+                mediaRecorder.processor.disconnect();
+                mediaRecorder.source.disconnect();
+            } catch (e) { /* 已断开 */ }
+            if (audioContext) {
+                audioContext.close();
+            }
+            mediaRecorder = null;
+            isRecording = false;
+        }
+
+        function waitForWebSocketOpen(socket, timeoutMs = 8000) {
+            return new Promise((resolve, reject) => {
+                if (socket.readyState === WebSocket.OPEN) {
+                    resolve();
+                    return;
+                }
+                const timer = setTimeout(() => reject(new Error('WebSocket 连接超时')), timeoutMs);
+                socket.addEventListener('open', () => {
+                    clearTimeout(timer);
+                    resolve();
+                }, { once: true });
+                socket.addEventListener('error', () => {
+                    clearTimeout(timer);
+                    reject(new Error('WebSocket 连接失败'));
+                }, { once: true });
+            });
         }
         
         // 处理 WebSocket 消息
@@ -523,14 +555,19 @@
             console.log('收到消息:', data);
             
             if (data.type === 'result') {
-                currentTextEl.textContent = data.text || '...';
-                totalTextEl.textContent = data.total_text || '';
+                if (data.text) {
+                    currentTextEl.textContent = data.text;
+                }
+                if (data.total_text) {
+                    totalTextEl.textContent = data.total_text;
+                }
             } else if (data.type === 'generating_summary') {
                 // 显示正在生成总结的提示
                 currentTextEl.textContent = data.message;
                 stopBtn.disabled = true;
                 stopBtn.innerHTML = '<span class="loading"></span>生成中...';
             } else if (data.type === 'session_end') {
+                sessionEnding = false;
                 currentTextEl.textContent = '会话已结束';
                 totalTextEl.textContent = data.total_text || '';
                 
@@ -542,12 +579,16 @@
                     summaryEl.style.display = 'block';
                 }
                 
-                // 恢复按钮状态
+                startBtn.disabled = false;
                 stopBtn.disabled = false;
                 stopBtn.innerHTML = '停止录音';
                 
                 if (data.error) {
                     alert('警告: ' + data.error);
+                }
+
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.close();
                 }
             } else if (data.type === 'error') {
                 alert('错误: ' + data.message);
@@ -561,7 +602,7 @@
         }
         
         const TARGET_SAMPLE_RATE = 16000;
-        const SILENCE_RMS_THRESHOLD = 0.008;
+        const SILENCE_RMS_THRESHOLD = 0.003;
         const SEND_BUFFER_SAMPLES = 9600; // 约 600ms @ 16kHz，与 FunASR 流式 chunk 对齐
 
         function calcRms(samples) {
@@ -614,8 +655,9 @@
                     }
                 });
                 
-                // 连接 WebSocket
+                // 连接 WebSocket 并等待就绪后再采集
                 connectWebSocket(meetingName);
+                await waitForWebSocketOpen(ws);
                 
                 // 使用设备实际采样率，由服务端重采样到 16kHz
                 audioContext = new AudioContext();
@@ -673,6 +715,7 @@
         
         // 停止录音
         function stopRecording() {
+            if (sessionEnding) return;
             isRecording = false;
             
             if (mediaRecorder) {
@@ -681,8 +724,7 @@
                     mediaRecorder.pcmSendBuffer &&
                     mediaRecorder.pcmSendBuffer.length > 0 &&
                     ws &&
-                    ws.readyState === WebSocket.OPEN &&
-                    calcRms(new Float32Array(mediaRecorder.pcmSendBuffer)) >= SILENCE_RMS_THRESHOLD
+                    ws.readyState === WebSocket.OPEN
                 ) {
                     ws.send(JSON.stringify({
                         type: 'audio',
@@ -690,25 +732,21 @@
                         sample_rate: TARGET_SAMPLE_RATE
                     }));
                 }
-                mediaRecorder.stream.getTracks().forEach(track => track.stop());
-                mediaRecorder.processor.disconnect();
-                mediaRecorder.source.disconnect();
-                if (audioContext) {
-                    audioContext.close();
-                }
-                mediaRecorder = null;
+                cleanupMediaOnly();
             }
             
             if (ws && ws.readyState === WebSocket.OPEN) {
+                sessionEnding = true;
                 ws.send(JSON.stringify({ type: 'end' }));
-                setTimeout(() => {
-                    ws.close();
-                }, 1000);
+                stopBtn.disabled = true;
+                stopBtn.innerHTML = '<span class="loading"></span>生成中...';
+                currentTextEl.textContent = '正在生成会议纪要，请稍候...';
+                // 保持连接直到收到 session_end，不在此处关闭 WebSocket
+            } else {
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                currentTextEl.textContent = '录音已停止';
             }
-            
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
-            currentTextEl.textContent = '录音已停止';
             
             console.log('停止录音');
         }

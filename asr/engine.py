@@ -65,6 +65,7 @@ class StreamingTranscriber:
         return np.interp(indices, np.arange(len(audio)), audio).astype(np.float32)
 
     def _has_speech(self, chunk: np.ndarray, is_final: bool = False) -> bool:
+        """能量门限判断；VAD 仅记录，避免误杀导致无识别输出。"""
         rms = float(np.sqrt(np.mean(chunk ** 2)))
         if rms < self.energy_threshold:
             return False
@@ -75,20 +76,34 @@ class StreamingTranscriber:
                 is_final=is_final,
                 chunk_size=self.VAD_CHUNK_MS,
             )
-            if res and len(res) > 0:
-                return len(res[0].get("value", [])) > 0
+            if res and len(res) > 0 and len(res[0].get("value", [])) > 0:
+                return True
         except Exception as e:
             logger.warning(f"VAD 检测异常，回退能量门限: {e}")
-            return rms >= self.energy_threshold * 2
-        return False
+        return True
+
+    @staticmethod
+    def _parse_asr_text(result_item: dict) -> str:
+        text = result_item.get("text") or result_item.get("value") or ""
+        if isinstance(text, list):
+            text = ""
+        return str(text).replace(" ", "").strip()
 
     def _extract_delta(self, text: str) -> str:
-        text = text.replace(" ", "")
         if not text:
             return ""
-        if text.startswith(self._last_partial):
-            delta = text[len(self._last_partial) :]
+        prev = self._last_partial
+        if not prev:
+            self._last_partial = text
+            return text
+        if text == prev:
+            return ""
+        if text.startswith(prev):
+            delta = text[len(prev) :]
+        elif prev.startswith(text):
+            delta = ""
         else:
+            # 非累积输出：整段作为增量
             delta = text
         self._last_partial = text
         return delta
@@ -128,9 +143,12 @@ class StreamingTranscriber:
                     decoder_chunk_look_back=self.DECODER_CHUNK_LOOK_BACK,
                 )
                 if res and len(res) > 0:
-                    delta = self._extract_delta(res[0].get("text", ""))
+                    raw_text = self._parse_asr_text(res[0])
+                    delta = self._extract_delta(raw_text)
                     if delta:
                         deltas.append(delta)
+                    elif raw_text:
+                        logger.debug(f"流式识别无增量: raw={raw_text!r} prev={self._last_partial!r}")
             except Exception as e:
                 logger.error(f"流式识别失败: {e}", exc_info=True)
 
@@ -152,7 +170,8 @@ class StreamingTranscriber:
                         decoder_chunk_look_back=self.DECODER_CHUNK_LOOK_BACK,
                     )
                     if res and len(res) > 0:
-                        delta = self._extract_delta(res[0].get("text", ""))
+                        raw_text = self._parse_asr_text(res[0])
+                        delta = self._extract_delta(raw_text)
                         if delta:
                             deltas.append(delta)
                 except Exception as e:
