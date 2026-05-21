@@ -560,6 +560,44 @@
             statusEl.className = 'status ' + (connected ? 'connected' : 'disconnected');
         }
         
+        const TARGET_SAMPLE_RATE = 16000;
+        const SILENCE_RMS_THRESHOLD = 0.008;
+        const SEND_BUFFER_SAMPLES = 9600; // 约 600ms @ 16kHz，与 FunASR 流式 chunk 对齐
+
+        function calcRms(samples) {
+            let sum = 0;
+            for (let i = 0; i < samples.length; i++) {
+                sum += samples[i] * samples[i];
+            }
+            return Math.sqrt(sum / samples.length);
+        }
+
+        function resampleTo16k(samples, fromRate) {
+            if (fromRate === TARGET_SAMPLE_RATE) {
+                return samples;
+            }
+            const ratio = fromRate / TARGET_SAMPLE_RATE;
+            const newLength = Math.round(samples.length / ratio);
+            const result = new Float32Array(newLength);
+            for (let i = 0; i < newLength; i++) {
+                const srcIndex = i * ratio;
+                const idx = Math.floor(srcIndex);
+                const frac = srcIndex - idx;
+                const s0 = samples[idx] || 0;
+                const s1 = samples[idx + 1] || 0;
+                result[i] = s0 * (1 - frac) + s1 * frac;
+            }
+            return result;
+        }
+
+        function floatToPcmBytes(float32Samples) {
+            const pcmData = new Int16Array(float32Samples.length);
+            for (let i = 0; i < float32Samples.length; i++) {
+                pcmData[i] = Math.max(-32768, Math.min(32767, float32Samples[i] * 32768));
+            }
+            return Array.from(new Uint8Array(pcmData.buffer));
+        }
+
         // 开始录音
         async function startRecording() {
             try {
@@ -569,20 +607,22 @@
                 // 获取麦克风权限
                 const stream = await navigator.mediaDevices.getUserMedia({ 
                     audio: {
-                        sampleRate: 16000,
                         channelCount: 1,
                         echoCancellation: true,
-                        noiseSuppression: true
+                        noiseSuppression: true,
+                        autoGainControl: true
                     }
                 });
                 
                 // 连接 WebSocket
                 connectWebSocket(meetingName);
                 
-                // 创建音频上下文
-                audioContext = new AudioContext({ sampleRate: 16000 });
+                // 使用设备实际采样率，由服务端重采样到 16kHz
+                audioContext = new AudioContext();
+                const sourceSampleRate = audioContext.sampleRate;
                 const source = audioContext.createMediaStreamSource(stream);
                 const processor = audioContext.createScriptProcessor(4096, 1, 1);
+                let pcmSendBuffer = [];
                 
                 source.connect(processor);
                 processor.connect(audioContext.destination);
@@ -591,24 +631,32 @@
                     if (!isRecording || !ws || ws.readyState !== WebSocket.OPEN) return;
                     
                     const inputData = e.inputBuffer.getChannelData(0);
-                    
-                    // 转换为 Int16 PCM 数据
-                    const pcmData = new Int16Array(inputData.length);
-                    for (let i = 0; i < inputData.length; i++) {
-                        pcmData[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                    const resampled = resampleTo16k(inputData, sourceSampleRate);
+
+                    // 静音时不发送，减少无效识别
+                    if (calcRms(resampled) < SILENCE_RMS_THRESHOLD) {
+                        return;
                     }
-                    
-                    // 发送音频数据
+
+                    for (let i = 0; i < resampled.length; i++) {
+                        pcmSendBuffer.push(resampled[i]);
+                    }
+
+                    if (pcmSendBuffer.length < SEND_BUFFER_SAMPLES) {
+                        return;
+                    }
+
+                    const chunk = pcmSendBuffer.splice(0, SEND_BUFFER_SAMPLES);
                     const message = {
                         type: 'audio',
-                        data: Array.from(new Uint8Array(pcmData.buffer)),
-                        sample_rate: 16000
+                        data: floatToPcmBytes(new Float32Array(chunk)),
+                        sample_rate: TARGET_SAMPLE_RATE
                     };
                     
                     ws.send(JSON.stringify(message));
                 };
                 
-                mediaRecorder = { stream, processor, source };
+                mediaRecorder = { stream, processor, source, pcmSendBuffer };
                 isRecording = true;
                 
                 startBtn.disabled = true;
@@ -628,6 +676,20 @@
             isRecording = false;
             
             if (mediaRecorder) {
+                // 发送缓冲区剩余音频
+                if (
+                    mediaRecorder.pcmSendBuffer &&
+                    mediaRecorder.pcmSendBuffer.length > 0 &&
+                    ws &&
+                    ws.readyState === WebSocket.OPEN &&
+                    calcRms(new Float32Array(mediaRecorder.pcmSendBuffer)) >= SILENCE_RMS_THRESHOLD
+                ) {
+                    ws.send(JSON.stringify({
+                        type: 'audio',
+                        data: floatToPcmBytes(new Float32Array(mediaRecorder.pcmSendBuffer)),
+                        sample_rate: TARGET_SAMPLE_RATE
+                    }));
+                }
                 mediaRecorder.stream.getTracks().forEach(track => track.stop());
                 mediaRecorder.processor.disconnect();
                 mediaRecorder.source.disconnect();

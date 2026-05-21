@@ -53,24 +53,34 @@ async def websocket_transcribe(websocket: WebSocket):
     connection_id = str(uuid.uuid4())
     await manager.connect(websocket, connection_id)
     
-    # 会话信息
+    # 会话信息（每连接独立的流式识别器，含 VAD 与音频缓冲）
+    transcriber = asr_engine.create_streaming_session()
     session_info = {
         "connection_id": connection_id,
         "start_time": datetime.now().isoformat(),
         "total_text": "",
         "file_id": None,
         "meeting_name": None,
-        "audio_chunks": 0
+        "audio_chunks": 0,
+        "transcriber": transcriber,
     }
     
     logger.info(f"开始实时语音转写会话", extra={'request_id': connection_id, 'input_params': {'connection_id': connection_id}})
     
     try:
         while True:
-            # 接收客户端消息
-            data = await websocket.receive_bytes()
-            
-            # 解析消息（假设第一个字节是消息类型）
+            # 接收客户端消息（前端使用 JSON 文本帧，非二进制）
+            raw_message = await websocket.receive()
+            if raw_message.get("type") == "websocket.disconnect":
+                raise WebSocketDisconnect()
+
+            if "text" in raw_message:
+                data = raw_message["text"].encode("utf-8")
+            elif "bytes" in raw_message:
+                data = raw_message["bytes"]
+            else:
+                continue
+
             if len(data) < 1:
                 continue
             
@@ -91,8 +101,9 @@ async def websocket_transcribe(websocket: WebSocket):
                     sample_rate = message.get("sample_rate", 16000)
                     session_info["audio_chunks"] += 1
                     
-                    # 异步进行语音识别
-                    text = await asr_engine.transcribe_stream_async(audio_bytes, sample_rate)
+                    text = await asr_engine.feed_stream_async(
+                        session_info["transcriber"], audio_bytes, sample_rate
+                    )
                     
                     if text:
                         session_info["total_text"] += text
@@ -107,6 +118,19 @@ async def websocket_transcribe(websocket: WebSocket):
                         await manager.send_json(connection_id, result)
                         
                 elif message.get("type") == "end":
+                    # 冲刷缓冲区中剩余音频
+                    final_text = await asr_engine.finalize_stream_async(
+                        session_info["transcriber"]
+                    )
+                    if final_text:
+                        session_info["total_text"] += final_text
+                        await manager.send_json(connection_id, {
+                            "type": "result",
+                            "text": final_text,
+                            "total_text": session_info["total_text"],
+                            "timestamp": datetime.now().isoformat(),
+                        })
+
                     # 会话结束，生成 AI 总结
                     duration_ms = (time.time() - start_time) * 1000
                     logger.info(f"会话结束，开始生成 AI 总结", extra={'request_id': connection_id, 'output_params': {'duration_ms': round(duration_ms, 2), 'total_text_length': len(session_info["total_text"]), 'audio_chunks': session_info["audio_chunks"]}})
@@ -184,27 +208,25 @@ async def websocket_transcribe(websocket: WebSocket):
                     break
                     
             except (json.JSONDecodeError, UnicodeDecodeError):
-                # 如果无法解析为 JSON，直接当作 PCM 数据处理
+                # 原始 PCM 二进制帧
                 try:
-                    text = asr_engine.transcribe_stream(data, sample_rate=16000)
-                    
+                    text = await asr_engine.feed_stream_async(
+                        session_info["transcriber"], data, 16000
+                    )
                     if text:
                         session_info["total_text"] += text
-                        
-                        result = {
+                        await manager.send_json(connection_id, {
                             "type": "result",
                             "text": text,
                             "total_text": session_info["total_text"],
-                            "timestamp": datetime.now().isoformat()
-                        }
-                        await manager.send_json(connection_id, result)
+                            "timestamp": datetime.now().isoformat(),
+                        })
                 except Exception as e:
                     logger.error(f"处理音频数据失败: {e}")
-                    error_msg = {
+                    await manager.send_json(connection_id, {
                         "type": "error",
-                        "message": f"处理失败: {str(e)}"
-                    }
-                    await manager.send_json(connection_id, error_msg)
+                        "message": f"处理失败: {str(e)}",
+                    })
     
     except WebSocketDisconnect:
         duration_ms = (time.time() - start_time) * 1000

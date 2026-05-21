@@ -27,6 +27,9 @@ def _path_from_env(key: str, default_relative: str) -> str:
 
 # ASR 配置
 asr_model_name = _env("ASR_MODEL_NAME", "paraformer-zh")
+asr_streaming_model_name = _env("ASR_STREAMING_MODEL_NAME", "paraformer-zh-streaming")
+asr_vad_model_name = _env("ASR_VAD_MODEL_NAME", "fsmn-vad")
+asr_energy_threshold = float(_env("ASR_ENERGY_THRESHOLD", "0.01") or "0.01")
 asr_device = _env("ASR_DEVICE", "cpu")
 ffmpeg_path = _env("FFMPEG_PATH", r"D:\AI\ffmpeg-8.1.1-essentials_build\bin")
 

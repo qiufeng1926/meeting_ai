@@ -2,4 +2,8 @@ logs/*
 output/summaries/*
 output/transcripts/*
 upload/*
-./.env
+.env
+*.pyc
+__pycache__/
+*.db
+.DS_Store

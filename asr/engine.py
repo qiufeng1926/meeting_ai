@@ -3,108 +3,269 @@ import asyncio
 from pathlib import Path
 from funasr import AutoModel
 import numpy as np
-import io
 from concurrent.futures import ThreadPoolExecutor
 from utils.logger import get_logger
+from config.config import (
+    asr_model_name,
+    asr_streaming_model_name,
+    asr_vad_model_name,
+    asr_device,
+    ffmpeg_path,
+    asr_energy_threshold,
+)
 
 logger = get_logger("asr_engine")
+
+TARGET_SAMPLE_RATE = 16000
+
+
+class StreamingTranscriber:
+    """
+    单路 WebSocket 实时转写会话。
+    使用流式 Paraformer + VAD，按 FunASR 推荐 chunk 推理，避免短片段幻觉。
+    """
+
+    CHUNK_SIZE = [0, 10, 5]
+    CHUNK_STRIDE = CHUNK_SIZE[1] * 960  # 600ms @ 16kHz
+    ENCODER_CHUNK_LOOK_BACK = 4
+    DECODER_CHUNK_LOOK_BACK = 1
+    VAD_CHUNK_MS = 200
+
+    def __init__(
+        self,
+        streaming_model,
+        vad_model,
+        energy_threshold: float = 0.01,
+    ):
+        self.asr_model = streaming_model
+        self.vad_model = vad_model
+        self.energy_threshold = energy_threshold
+        self.asr_cache: dict = {}
+        self.vad_cache: dict = {}
+        self.buffer = np.array([], dtype=np.float32)
+        self._last_partial = ""
+        self._silence_chunks = 0
+        self._max_silence_chunks = 10
+
+    @staticmethod
+    def _bytes_to_float(audio_bytes: bytes) -> np.ndarray:
+        if not audio_bytes:
+            return np.array([], dtype=np.float32)
+        audio_np = np.frombuffer(audio_bytes, dtype=np.int16)
+        return audio_np.astype(np.float32) / 32768.0
+
+    @staticmethod
+    def _resample(audio: np.ndarray, orig_sr: int, target_sr: int = TARGET_SAMPLE_RATE) -> np.ndarray:
+        if orig_sr == target_sr or len(audio) == 0:
+            return audio
+        target_len = int(len(audio) * target_sr / orig_sr)
+        if target_len <= 0:
+            return np.array([], dtype=np.float32)
+        indices = np.linspace(0, len(audio) - 1, target_len)
+        return np.interp(indices, np.arange(len(audio)), audio).astype(np.float32)
+
+    def _has_speech(self, chunk: np.ndarray, is_final: bool = False) -> bool:
+        rms = float(np.sqrt(np.mean(chunk ** 2)))
+        if rms < self.energy_threshold:
+            return False
+        try:
+            res = self.vad_model.generate(
+                input=chunk,
+                cache=self.vad_cache,
+                is_final=is_final,
+                chunk_size=self.VAD_CHUNK_MS,
+            )
+            if res and len(res) > 0:
+                return len(res[0].get("value", [])) > 0
+        except Exception as e:
+            logger.warning(f"VAD 检测异常，回退能量门限: {e}")
+            return rms >= self.energy_threshold * 2
+        return False
+
+    def _extract_delta(self, text: str) -> str:
+        text = text.replace(" ", "")
+        if not text:
+            return ""
+        if text.startswith(self._last_partial):
+            delta = text[len(self._last_partial) :]
+        else:
+            delta = text
+        self._last_partial = text
+        return delta
+
+    def _reset_utterance_state(self) -> None:
+        self._last_partial = ""
+        self._silence_chunks = 0
+        self.asr_cache = {}
+        self.vad_cache = {}
+
+    def feed(self, audio_bytes: bytes, sample_rate: int = TARGET_SAMPLE_RATE) -> str:
+        audio_float = self._resample(self._bytes_to_float(audio_bytes), sample_rate)
+        if len(audio_float) == 0:
+            return ""
+
+        self.buffer = np.concatenate([self.buffer, audio_float])
+        deltas: list[str] = []
+
+        while len(self.buffer) >= self.CHUNK_STRIDE:
+            chunk = self.buffer[: self.CHUNK_STRIDE].copy()
+            self.buffer = self.buffer[self.CHUNK_STRIDE :]
+
+            if not self._has_speech(chunk):
+                self._silence_chunks += 1
+                if self._silence_chunks >= self._max_silence_chunks:
+                    self._reset_utterance_state()
+                continue
+
+            self._silence_chunks = 0
+            try:
+                res = self.asr_model.generate(
+                    input=chunk,
+                    cache=self.asr_cache,
+                    is_final=False,
+                    chunk_size=self.CHUNK_SIZE,
+                    encoder_chunk_look_back=self.ENCODER_CHUNK_LOOK_BACK,
+                    decoder_chunk_look_back=self.DECODER_CHUNK_LOOK_BACK,
+                )
+                if res and len(res) > 0:
+                    delta = self._extract_delta(res[0].get("text", ""))
+                    if delta:
+                        deltas.append(delta)
+            except Exception as e:
+                logger.error(f"流式识别失败: {e}", exc_info=True)
+
+        return "".join(deltas)
+
+    def finalize(self) -> str:
+        deltas: list[str] = []
+        if len(self.buffer) > 0:
+            chunk = self.buffer.copy()
+            self.buffer = np.array([], dtype=np.float32)
+            if self._has_speech(chunk, is_final=True):
+                try:
+                    res = self.asr_model.generate(
+                        input=chunk,
+                        cache=self.asr_cache,
+                        is_final=True,
+                        chunk_size=self.CHUNK_SIZE,
+                        encoder_chunk_look_back=self.ENCODER_CHUNK_LOOK_BACK,
+                        decoder_chunk_look_back=self.DECODER_CHUNK_LOOK_BACK,
+                    )
+                    if res and len(res) > 0:
+                        delta = self._extract_delta(res[0].get("text", ""))
+                        if delta:
+                            deltas.append(delta)
+                except Exception as e:
+                    logger.error(f"流式识别收尾失败: {e}", exc_info=True)
+        self._reset_utterance_state()
+        return "".join(deltas)
 
 
 class FunASREngine:
     def __init__(
         self,
-        model_name: str = "paraformer-zh",
-        device: str = "cpu",
-        ffmpeg_path: str = r"D:\AI\ffmpeg-8.1.1-essentials_build\bin",
+        model_name: str | None = None,
+        streaming_model_name: str | None = None,
+        vad_model_name: str | None = None,
+        device: str | None = None,
+        ffmpeg_path_str: str | None = None,
+        energy_threshold: float | None = None,
     ):
-        """
-        FunASR 语音识别引擎
-        """
+        model_name = model_name or asr_model_name
+        streaming_model_name = streaming_model_name or asr_streaming_model_name
+        vad_model_name = vad_model_name or asr_vad_model_name
+        device = device or asr_device
+        ffmpeg_path_str = ffmpeg_path_str or ffmpeg_path
+        self.energy_threshold = (
+            energy_threshold if energy_threshold is not None else asr_energy_threshold
+        )
+        self.streaming_model_name = streaming_model_name
+        self.vad_model_name = vad_model_name
 
-        # 配置 ffmpeg
-        os.environ["PATH"] += os.pathsep + ffmpeg_path
+        os.environ["PATH"] += os.pathsep + ffmpeg_path_str
 
-        # 初始化模型
-        self.model = AutoModel(
+        logger.info(
+            "加载批量 ASR 模型",
+            extra={"input_params": {"model": model_name, "device": device}},
+        )
+        self.batch_model = AutoModel(
             model=model_name,
+            vad_model=vad_model_name,
             device=device,
             disable_update=True,
         )
-        
-        # 创建线程池用于异步执行
+
+        self._streaming_model = None
+        self._vad_model = None
         self.executor = ThreadPoolExecutor(max_workers=4)
 
-    def transcribe(self, audio_path: str) -> str:
-        """
-        音频转文字（批量模式）
-        """
+    def _get_streaming_model(self):
+        if self._streaming_model is None:
+            logger.info(
+                "加载流式 ASR 模型",
+                extra={"input_params": {"model": self.streaming_model_name}},
+            )
+            self._streaming_model = AutoModel(
+                model=self.streaming_model_name,
+                device=asr_device,
+                disable_update=True,
+            )
+        return self._streaming_model
 
+    def _get_vad_model(self):
+        if self._vad_model is None:
+            logger.info(
+                "加载 VAD 模型",
+                extra={"input_params": {"model": self.vad_model_name}},
+            )
+            self._vad_model = AutoModel(
+                model=self.vad_model_name,
+                device=asr_device,
+                disable_update=True,
+            )
+        return self._vad_model
+
+    def create_streaming_session(self) -> StreamingTranscriber:
+        return StreamingTranscriber(
+            self._get_streaming_model(),
+            self._get_vad_model(),
+            energy_threshold=self.energy_threshold,
+        )
+
+    def transcribe(self, audio_path: str) -> str:
         audio_path = str(Path(audio_path).resolve())
         logger.info(f"开始转录音频文件: {audio_path}")
 
-        result = self.model.generate(
+        result = self.batch_model.generate(
             input=audio_path,
             batch_size_s=300,
         )
 
         text = result[0]["text"]
+        return text.replace(" ", "")
 
-        # 去除空格
-        text = text.replace(" ", "")
-
-        return text
-    
     async def transcribe_async(self, audio_path: str) -> str:
-        """
-        异步音频转文字（批量模式）
-        """
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(self.executor, self.transcribe, audio_path)
 
-    def transcribe_stream(self, audio_data: bytes, sample_rate: int = 16000) -> str:
-        """
-        流式音频转文字
-        :param audio_data: 音频数据（PCM 格式）
-        :param sample_rate: 采样率
-        :return: 识别文本
-        """
-        try:
-            # 将字节数据转换为 numpy 数组
-            audio_np = np.frombuffer(audio_data, dtype=np.int16)
-            
-            # 归一化到 [-1, 1]
-            audio_float = audio_np.astype(np.float32) / 32768.0
-            
-            # 使用模型进行识别
-            result = self.model.generate(
-                input=audio_float,
-                batch_size_s=300,
-                fs=sample_rate,
-            )
-            
-            if result and len(result) > 0:
-                text = result[0].get("text", "")
-                return text.replace(" ", "")
-            return ""
-        except Exception as e:
-            logger.error(f"流式识别失败: {e}", exc_info=True)
-            return ""
-    
-    async def transcribe_stream_async(self, audio_data: bytes, sample_rate: int = 16000) -> str:
-        """
-        异步流式音频转文字
-        """
+    async def feed_stream_async(
+        self, session: StreamingTranscriber, audio_bytes: bytes, sample_rate: int
+    ) -> str:
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(self.executor, self.transcribe_stream, audio_data, sample_rate)
+        return await loop.run_in_executor(
+            self.executor, session.feed, audio_bytes, sample_rate
+        )
+
+    async def finalize_stream_async(self, session: StreamingTranscriber) -> str:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.executor, session.finalize)
 
 
 if __name__ == "__main__":
     logger_main = get_logger("asr_test")
     engine = FunASREngine()
 
-    text = engine.transcribe(
-        r"./example/asr_example.wav"
-    )
+    text = engine.transcribe(r"./example/asr_example.wav")
 
     logger_main.info("\n========== ASR RESULT ==========\n")
     logger_main.info(text)
