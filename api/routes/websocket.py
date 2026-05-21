@@ -1,10 +1,32 @@
 import json
+import re
 import uuid
 import os
 import time
 import asyncio
 from pathlib import Path
 from datetime import datetime
+
+_FILE_ID_RE = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+    re.IGNORECASE,
+)
+
+
+def _extract_file_id_from_filename(filename: str) -> str | None:
+    match = _FILE_ID_RE.search(filename)
+    return match.group(0) if match else None
+
+
+def _find_transcript_by_file_id(transcripts_dir: str, file_id: str) -> tuple[str | None, str | None]:
+    if not os.path.exists(transcripts_dir):
+        return None, None
+    for filename in os.listdir(transcripts_dir):
+        if not filename.endswith(".txt"):
+            continue
+        if filename.startswith(file_id) or f"_{file_id}_" in filename:
+            return os.path.join(transcripts_dir, filename), filename
+    return None, None
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from utils.logger import get_logger
 from asr.engine import FunASREngine
@@ -42,15 +64,42 @@ class ConnectionManager:
         try:
             await ws.send_json(data)
             return True
-        except WebSocketDisconnect:
+        except (WebSocketDisconnect, RuntimeError) as e:
+            logger.warning(
+                f"WebSocket 发送失败: {type(e).__name__}",
+                extra={"request_id": connection_id, "msg_type": data.get("type")},
+            )
             self.disconnect(connection_id)
             return False
-        except RuntimeError:
+        except Exception as e:
+            logger.warning(
+                f"WebSocket 发送异常: {e}",
+                extra={"request_id": connection_id, "msg_type": data.get("type")},
+            )
             self.disconnect(connection_id)
             return False
 
 
 manager = ConnectionManager()
+
+
+async def _run_with_keepalive(
+    connection_id: str,
+    coro,
+    stage: str = "summary",
+    interval: float = 12.0,
+):
+    """长任务期间定期发送心跳，避免代理/浏览器因空闲断开连接。"""
+    task = asyncio.create_task(coro)
+    while not task.done():
+        try:
+            return await asyncio.wait_for(asyncio.shield(task), timeout=interval)
+        except asyncio.TimeoutError:
+            await manager.send_json(
+                connection_id,
+                {"type": "heartbeat", "stage": stage},
+            )
+    return await task
 
 
 @router.websocket("/ws/transcribe")
@@ -179,21 +228,25 @@ async def websocket_transcribe(websocket: WebSocket):
                         ),
                     }
 
-                    # 发送正在生成总结的消息
-                    if not await manager.send_json(connection_id, {
+                    # 先推送转写完成，前端可立即展示全文
+                    await manager.send_json(connection_id, {
+                        "type": "transcribe_complete",
+                        **end_result_base,
+                    })
+                    await manager.send_json(connection_id, {
                         "type": "generating_summary",
                         "message": "正在生成 AI 会议纪要...",
-                    }):
-                        logger.info(
-                            "客户端已断开，跳过 AI 总结推送",
-                            extra={"request_id": connection_id},
-                        )
-                        break
+                        "file_id": file_id,
+                    })
 
-                    # 异步生成 AI 总结
+                    # 异步生成 AI 总结（期间发送心跳保活）
                     try:
-                        summary = await glm_client.summary_meeting_async(
-                            session_info["total_text"]
+                        summary = await _run_with_keepalive(
+                            connection_id,
+                            glm_client.summary_meeting_async(
+                                session_info["total_text"]
+                            ),
+                            stage="summary",
                         )
 
                         summary_path = os.path.join(
@@ -220,7 +273,15 @@ async def websocket_transcribe(websocket: WebSocket):
                             "summary_file": summary_path,
                             **end_result_base,
                         }
-                        await manager.send_json(connection_id, end_result)
+                        sent = await manager.send_json(connection_id, end_result)
+                        if not sent:
+                            logger.warning(
+                                "session_end 推送失败，客户端可能已断开，结果已保存至文件",
+                                extra={
+                                    "request_id": connection_id,
+                                    "file_id": file_id,
+                                },
+                            )
 
                     except Exception as e:
                         total_duration_ms = (time.time() - start_time) * 1000
@@ -310,7 +371,7 @@ async def list_meetings():
         if os.path.exists(transcripts_dir):
             for filename in sorted(os.listdir(transcripts_dir), reverse=True):
                 if filename.endswith('.txt'):
-                    file_id = filename.split('_')[0]
+                    file_id = _extract_file_id_from_filename(filename) or filename.split('_')[0]
                     filepath = os.path.join(transcripts_dir, filename)
                     
                     # 获取文件信息
@@ -378,14 +439,12 @@ async def get_meeting(file_id: str):
         transcript_file = None
         summary_file = None
         
-        for filename in os.listdir(transcripts_dir):
-            if filename.startswith(file_id):
-                transcript_file = os.path.join(transcripts_dir, filename)
-                summary_filename = filename.replace('.txt', '.md')
-                summary_path = os.path.join(summaries_dir, summary_filename)
-                if os.path.exists(summary_path):
-                    summary_file = summary_path
-                break
+        transcript_file, matched_name = _find_transcript_by_file_id(transcripts_dir, file_id)
+        if transcript_file and matched_name:
+            summary_filename = matched_name.replace('.txt', '.md')
+            summary_path = os.path.join(summaries_dir, summary_filename)
+            if os.path.exists(summary_path):
+                summary_file = summary_path
         
         if not transcript_file:
             duration_ms = (time.time() - start_time) * 1000

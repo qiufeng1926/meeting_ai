@@ -320,7 +320,7 @@
 </head>
 <body>
     <div class="header">
-        <h1>🎤 会议 AI 系统</h1>
+        <h1>🎤 会议 AI 助手</h1>
         <p>智能语音识别与会议纪要生成</p>
     </div>
     
@@ -447,6 +447,9 @@
         let audioContext = null;
         let isRecording = false;
         let sessionEnding = false;
+        let pendingFileId = null;
+        let pollAbort = false;
+        let pollFallbackTimer = null;
         let selectedFile = null;
         
         const statusEl = document.getElementById('status');
@@ -513,9 +516,80 @@
             ws.onclose = () => {
                 console.log('WebSocket 连接关闭');
                 updateStatus('已断开', false);
-                sessionEnding = false;
                 cleanupMediaOnly();
+                if (sessionEnding && pendingFileId) {
+                    currentTextEl.textContent = '连接已断开，正在从服务器获取会议纪要...';
+                    pollMeetingSummary(pendingFileId);
+                } else if (sessionEnding) {
+                    resetRealtimeSessionUI('连接已断开，请查看历史记录');
+                }
             };
+        }
+
+        function resetRealtimeSessionUI(statusText) {
+            sessionEnding = false;
+            pollAbort = true;
+            startBtn.disabled = false;
+            stopBtn.disabled = false;
+            stopBtn.innerHTML = '停止录音';
+            if (statusText) {
+                currentTextEl.textContent = statusText;
+            }
+        }
+
+        function applySessionResult(data) {
+            sessionEnding = false;
+            pollAbort = true;
+            pendingFileId = null;
+            if (pollFallbackTimer) {
+                clearTimeout(pollFallbackTimer);
+                pollFallbackTimer = null;
+            }
+
+            if (data.total_text) {
+                totalTextEl.textContent = data.total_text;
+            }
+            currentTextEl.textContent = '会话已结束';
+
+            if (data.summary) {
+                const summaryEl = document.getElementById('realtimeSummary');
+                const summaryTextEl = document.getElementById('realtimeSummaryText');
+                summaryTextEl.textContent = data.summary;
+                summaryEl.style.display = 'block';
+            }
+
+            startBtn.disabled = false;
+            stopBtn.disabled = false;
+            stopBtn.innerHTML = '停止录音';
+
+            if (data.error) {
+                alert('警告: ' + data.error);
+            }
+        }
+
+        async function pollMeetingSummary(fileId, maxAttempts = 90) {
+            pollAbort = false;
+            for (let i = 0; i < maxAttempts; i++) {
+                if (pollAbort) return;
+                try {
+                    const resp = await fetch(`/api/meetings/${fileId}`);
+                    const data = await resp.json();
+                    if (data.success && data.summary) {
+                        applySessionResult({
+                            total_text: data.transcript,
+                            summary: data.summary,
+                        });
+                        if (ws && ws.readyState === WebSocket.OPEN) {
+                            ws.close();
+                        }
+                        return;
+                    }
+                } catch (e) {
+                    console.error('轮询会议结果失败:', e);
+                }
+                await new Promise(r => setTimeout(r, 2000));
+            }
+            resetRealtimeSessionUI('纪要已生成，请到「历史会议」查看');
         }
 
         function cleanupMediaOnly() {
@@ -561,32 +635,34 @@
                 if (data.total_text) {
                     totalTextEl.textContent = data.total_text;
                 }
+            } else if (data.type === 'transcribe_complete') {
+                if (data.file_id) {
+                    pendingFileId = data.file_id;
+                }
+                if (data.total_text) {
+                    totalTextEl.textContent = data.total_text;
+                }
+                currentTextEl.textContent = '转写完成，正在生成 AI 会议纪要...';
             } else if (data.type === 'generating_summary') {
-                // 显示正在生成总结的提示
-                currentTextEl.textContent = data.message;
+                if (data.file_id) {
+                    pendingFileId = data.file_id;
+                }
+                currentTextEl.textContent = data.message || '正在生成 AI 会议纪要...';
                 stopBtn.disabled = true;
                 stopBtn.innerHTML = '<span class="loading"></span>生成中...';
+                // 兜底：WebSocket 长时间无响应时通过 HTTP 拉取结果
+                if (pendingFileId) {
+                    if (pollFallbackTimer) clearTimeout(pollFallbackTimer);
+                    pollFallbackTimer = setTimeout(() => {
+                        if (sessionEnding && pendingFileId) {
+                            pollMeetingSummary(pendingFileId);
+                        }
+                    }, 15000);
+                }
+            } else if (data.type === 'heartbeat') {
+                console.log('服务端处理中:', data.stage);
             } else if (data.type === 'session_end') {
-                sessionEnding = false;
-                currentTextEl.textContent = '会话已结束';
-                totalTextEl.textContent = data.total_text || '';
-                
-                // 显示 AI 总结
-                if (data.summary) {
-                    const summaryEl = document.getElementById('realtimeSummary');
-                    const summaryTextEl = document.getElementById('realtimeSummaryText');
-                    summaryTextEl.textContent = data.summary;
-                    summaryEl.style.display = 'block';
-                }
-                
-                startBtn.disabled = false;
-                stopBtn.disabled = false;
-                stopBtn.innerHTML = '停止录音';
-                
-                if (data.error) {
-                    alert('警告: ' + data.error);
-                }
-
+                applySessionResult(data);
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.close();
                 }
@@ -642,6 +718,17 @@
         // 开始录音
         async function startRecording() {
             try {
+                sessionEnding = false;
+                pendingFileId = null;
+                pollAbort = true;
+                if (pollFallbackTimer) {
+                    clearTimeout(pollFallbackTimer);
+                    pollFallbackTimer = null;
+                }
+                document.getElementById('realtimeSummary').style.display = 'none';
+                document.getElementById('realtimeSummaryText').textContent = '';
+                totalTextEl.textContent = '';
+
                 // 获取会议名称
                 const meetingName = document.getElementById('meetingNameInput').value.trim();
                 
