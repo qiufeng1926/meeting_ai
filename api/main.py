@@ -88,3 +88,13 @@ async def root():
         "message": "Meeting AI API",
         "docs": "/docs"
     }
+
+
+# favicon.ico 处理
+@app.get("/favicon.ico")
+async def favicon():
+    """
+    返回空响应以避免 404 错误
+    """
+    from fastapi.responses import Response
+    return Response(status_code=204)
