@@ -45,3 +45,14 @@ output_dir = _path_from_env("OUTPUT_DIR", "output")
 # ASR 示例文件路径
 asr_example_audio = _path_from_env("ASR_EXAMPLE_AUDIO", "asr/example/asr_example.wav")
 asr_hotword_file = _path_from_env("ASR_HOTWORD_FILE", "asr/example/hotword.txt")
+
+# MySQL 数据库配置
+db_host = _env("DB_HOST", "localhost")
+db_port = _env("DB_PORT", "3306")
+db_user = _env("DB_USER", "root")
+db_password = _env("DB_PASSWORD", "")
+db_name = _env("DB_NAME", "meeting_ai")
+db_charset = _env("DB_CHARSET", "utf8mb4")
+
+# 构建数据库连接URL
+database_url = f"mysql+pymysql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}?charset={db_charset}"

@@ -16,6 +16,7 @@ from config.config import upload_dir, output_dir
 from asr.engine import FunASREngine
 from llm.glm_chat import GLMClient
 from utils.logger import get_logger
+from db.session import save_meeting_to_db
 
 router = APIRouter()
 logger = get_logger("meeting_route")
@@ -113,6 +114,30 @@ async def upload_meeting_audio(
 
         # 计算总耗时
         total_duration_ms = (time.time() - start_time) * 1000
+
+        # 保存到数据库
+        try:
+            meeting_data = {
+                'file_id': file_id,
+                'meeting_name': meeting_name,
+                'original_filename': file.filename,
+                'meeting_type': 'batch',
+                'audio_file_path': save_path,
+                'transcript_file_path': transcript_path,
+                'summary_file_path': summary_path,
+                'transcript': transcript,
+                'summary': summary,
+                'transcript_length': len(transcript),
+                'summary_length': len(summary),
+                'asr_duration_ms': round(asr_duration, 2),
+                'llm_duration_ms': round(llm_duration, 2),
+                'total_duration_ms': round(total_duration_ms, 2),
+                'status': 'completed'
+            }
+            save_meeting_to_db(meeting_data)
+            logger.info(f"会议数据已保存到数据库", extra={'request_id': request_id})
+        except Exception as db_error:
+            logger.error(f"保存会议数据到数据库失败: {str(db_error)}", exc_info=True, extra={'request_id': request_id})
         
         # 准备输出参数
         output_params = {

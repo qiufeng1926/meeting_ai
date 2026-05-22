@@ -32,6 +32,7 @@ from utils.logger import get_logger
 from asr.engine import FunASREngine
 from llm.glm_chat import GLMClient
 from config.config import output_dir
+from db.session import save_meeting_to_db
 
 router = APIRouter()
 logger = get_logger("websocket_route")
@@ -267,6 +268,28 @@ async def websocket_transcribe(websocket: WebSocket):
                             },
                         )
 
+                        # 保存到数据库
+                        try:
+                            meeting_data = {
+                                'file_id': file_id,
+                                'meeting_name': meeting_name if meeting_name else None,
+                                'original_filename': transcript_filename,
+                                'meeting_type': 'realtime',
+                                'audio_file_path': None,
+                                'transcript_file_path': transcript_path,
+                                'summary_file_path': summary_path,
+                                'transcript': session_info["total_text"],
+                                'summary': summary,
+                                'transcript_length': len(session_info["total_text"]),
+                                'summary_length': len(summary),
+                                'total_duration_ms': round(total_duration_ms, 2),
+                                'status': 'completed'
+                            }
+                            save_meeting_to_db(meeting_data)
+                            logger.info(f"实时会议数据已保存到数据库", extra={'request_id': connection_id})
+                        except Exception as db_error:
+                            logger.error(f"保存实时会议数据到数据库失败: {str(db_error)}", exc_info=True, extra={'request_id': connection_id})
+
                         end_result = {
                             "type": "session_end",
                             "summary": summary,
@@ -297,6 +320,30 @@ async def websocket_transcribe(websocket: WebSocket):
                                 },
                             },
                         )
+                        
+                        # 即使AI总结失败，也保存转写文本到数据库
+                        try:
+                            meeting_data = {
+                                'file_id': file_id,
+                                'meeting_name': meeting_name if meeting_name else None,
+                                'original_filename': transcript_filename,
+                                'meeting_type': 'realtime',
+                                'audio_file_path': None,
+                                'transcript_file_path': transcript_path,
+                                'summary_file_path': None,
+                                'transcript': session_info["total_text"],
+                                'summary': None,
+                                'transcript_length': len(session_info["total_text"]),
+                                'summary_length': 0,
+                                'total_duration_ms': round(total_duration_ms, 2),
+                                'status': 'failed',
+                                'error_message': f"生成总结失败: {str(e)}"
+                            }
+                            save_meeting_to_db(meeting_data)
+                            logger.info(f"失败的实时会议数据已保存到数据库", extra={'request_id': connection_id})
+                        except Exception as db_error:
+                            logger.error(f"保存失败的实时会议数据到数据库失败: {str(db_error)}", exc_info=True, extra={'request_id': connection_id})
+                        
                         end_result = {
                             "type": "session_end",
                             "summary": None,
