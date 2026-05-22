@@ -99,24 +99,43 @@ def get_meeting_by_file_id(file_id: str) -> Meeting:
         return meeting
 
 
-def get_all_meetings(limit: int = 100, offset: int = 0) -> list:
+def get_all_meetings(limit: int = 100, offset: int = 0, start_date: str = None, end_date: str = None) -> list:
     """
-    获取所有会议记录（分页）
+    获取所有会议记录（分页，支持日期筛选）
     
     Args:
         limit: 每页数量
         offset: 偏移量
+        start_date: 开始日期 (YYYY-MM-DD)
+        end_date: 结束日期 (YYYY-MM-DD)
         
     Returns:
-        list: 会议记录列表
+        list: 会议记录字典列表
     """
     with get_db_session() as session:
-        meetings = session.query(Meeting)\
-            .order_by(Meeting.created_at.desc())\
-            .limit(limit)\
-            .offset(offset)\
-            .all()
-        return meetings
+        query = session.query(Meeting)
+        
+        # 添加日期筛选条件
+        if start_date:
+            try:
+                from datetime import datetime as dt
+                start_dt = dt.strptime(start_date, '%Y-%m-%d')
+                query = query.filter(Meeting.created_at >= start_dt)
+            except ValueError:
+                logger.warning(f"无效的开始日期格式: {start_date}")
+        
+        if end_date:
+            try:
+                from datetime import datetime as dt, timedelta
+                end_dt = dt.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
+                query = query.filter(Meeting.created_at < end_dt)
+            except ValueError:
+                logger.warning(f"无效的结束日期格式: {end_date}")
+        
+        meetings = query.order_by(Meeting.created_at.desc()).limit(limit).offset(offset).all()
+        
+        # 在会话关闭前转换为字典
+        return [meeting.to_dict() for meeting in meetings]
 
 
 def delete_meeting(file_id: str) -> bool:

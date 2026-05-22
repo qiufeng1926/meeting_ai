@@ -435,6 +435,30 @@
         <div id="historyPanel" class="content-panel">
             <h2 style="color: #333; margin-bottom: 20px;">📋 历史会议记录</h2>
             
+            <!-- 日期筛选器 -->
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                    <div style="flex: 1; min-width: 200px;">
+                        <label style="display: block; color: #666; font-size: 14px; margin-bottom: 8px; font-weight: bold;">开始日期：</label>
+                        <input type="date" id="startDateFilter" 
+                               style="width: 100%; padding: 10px 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; transition: all 0.3s;"
+                               onfocus="this.style.borderColor='#667eea'" 
+                               onblur="this.style.borderColor='#e0e0e0'">
+                    </div>
+                    <div style="flex: 1; min-width: 200px;">
+                        <label style="display: block; color: #666; font-size: 14px; margin-bottom: 8px; font-weight: bold;">结束日期：</label>
+                        <input type="date" id="endDateFilter" 
+                               style="width: 100%; padding: 10px 12px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 14px; transition: all 0.3s;"
+                               onfocus="this.style.borderColor='#667eea'" 
+                               onblur="this.style.borderColor='#e0e0e0'">
+                    </div>
+                    <div style="display: flex; gap: 10px; align-items: flex-end;">
+                        <button onclick="loadHistory()" class="btn-primary" style="padding: 10px 25px; font-size: 14px;">🔍 查询</button>
+                        <button onclick="clearDateFilter()" class="btn-primary" style="padding: 10px 25px; font-size: 14px; background: #999;">清除</button>
+                    </div>
+                </div>
+            </div>
+            
             <div id="historyList" style="max-height: 700px; overflow-y: auto;">
                 <p style="text-align: center; color: #999;">加载中...</p>
             </div>
@@ -971,28 +995,38 @@
             console.log('页面已加载');
         };
         
+        // 清除日期筛选
+        function clearDateFilter() {
+            document.getElementById('startDateFilter').value = '';
+            document.getElementById('endDateFilter').value = '';
+            loadHistory();
+        }
+        
         // 加载历史会议
         async function loadHistory() {
             const listEl = document.getElementById('historyList');
             listEl.innerHTML = '<p style="text-align: center; color: #999;">加载中...</p>';
             
+            // 获取日期筛选参数
+            const startDate = document.getElementById('startDateFilter').value;
+            const endDate = document.getElementById('endDateFilter').value;
+            
             try {
-                const response = await fetch('/api/meetings/list');
+                // 构建查询参数
+                const params = new URLSearchParams();
+                if (startDate) params.append('start_date', startDate);
+                if (endDate) params.append('end_date', endDate);
+                
+                const response = await fetch(`/api/meetings/list?${params.toString()}`);
                 const data = await response.json();
                 
                 if (data.success && data.meetings.length > 0) {
                     let html = '';
                     data.meetings.forEach(meeting => {
                         const date = new Date(meeting.created_at).toLocaleString('zh-CN');
-                        const sizeKB = (meeting.size / 1024).toFixed(2);
                         
-                        // 提取会议名称（从文件名中）
-                        let displayName = meeting.filename;
-                        const parts = meeting.filename.split('_');
-                        if (parts.length > 2 && !meeting.filename.match(/^[a-f0-9-]{36}/)) {
-                            // 如果文件名以会议名称开头
-                            displayName = parts[0].replace(/_/g, ' ');
-                        }
+                        // 显示会议名称
+                        let displayName = meeting.meeting_name || meeting.original_filename || '未命名会议';
                         
                         html += `
                             <div style="border: 1px solid #e0e0e0; border-radius: 10px; padding: 15px; margin-bottom: 15px; cursor: pointer; transition: all 0.3s;" 
@@ -1004,11 +1038,11 @@
                                     <span style="color: #999; font-size: 12px;">${date}</span>
                                 </div>
                                 <div style="color: #666; font-size: 14px; margin-bottom: 8px;">
-                                    文件大小: ${sizeKB} KB | 
+                                    ${meeting.transcript_length ? `文本长度: ${meeting.transcript_length} 字符 | ` : ''}
                                     ${meeting.has_summary ? '✅ 有总结' : '❌ 无总结'}
                                 </div>
                                 <div style="color: #999; font-size: 13px; background: #f5f5f5; padding: 8px; border-radius: 5px;">
-                                    ${meeting.preview.substring(0, 150)}...
+                                    ${(meeting.preview || '').substring(0, 150)}...
                                 </div>
                             </div>
                         `;

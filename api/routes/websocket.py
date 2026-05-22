@@ -401,49 +401,24 @@ async def websocket_status():
 
 
 @router.get("/meetings/list")
-async def list_meetings():
-    """获取已保存的会议列表"""
+async def list_meetings(start_date: str = None, end_date: str = None, limit: int = 100, offset: int = 0):
+    """获取已保存的会议列表（从数据库检索，支持日期筛选）"""
     start_time = time.time()
     request_id = str(uuid.uuid4())
     
-    logger.info(f"获取会议列表请求", extra={'request_id': request_id})
+    input_params = {
+        "start_date": start_date,
+        "end_date": end_date,
+        "limit": limit,
+        "offset": offset
+    }
+    logger.info(f"获取会议列表请求", extra={'request_id': request_id, 'input_params': input_params})
     
     try:
-        transcripts_dir = os.path.join(output_dir, "transcripts")
-        summaries_dir = os.path.join(output_dir, "summaries")
+        from db.session import get_all_meetings
         
-        meetings = []
-        
-        # 获取所有转写文件
-        if os.path.exists(transcripts_dir):
-            for filename in sorted(os.listdir(transcripts_dir), reverse=True):
-                if filename.endswith('.txt'):
-                    file_id = _extract_file_id_from_filename(filename) or filename.split('_')[0]
-                    filepath = os.path.join(transcripts_dir, filename)
-                    
-                    # 获取文件信息
-                    stat = os.stat(filepath)
-                    created_time = datetime.fromtimestamp(stat.st_ctime).isoformat()
-                    
-                    # 查找对应的总结文件
-                    summary_filename = filename.replace('.txt', '.md')
-                    summary_path = os.path.join(summaries_dir, summary_filename)
-                    has_summary = os.path.exists(summary_path)
-                    
-                    # 读取部分内容作为预览
-                    with open(filepath, 'r', encoding='utf-8') as f:
-                        preview = f.read(200)  # 前200字符
-                    
-                    meetings.append({
-                        "file_id": file_id,
-                        "filename": filename,
-                        "created_at": created_time,
-                        "size": stat.st_size,
-                        "has_summary": has_summary,
-                        "preview": preview,
-                        "transcript_file": filepath,
-                        "summary_file": summary_path if has_summary else None
-                    })
+        # 从数据库获取会议记录（已转换为字典）
+        meetings = get_all_meetings(limit=limit, offset=offset, start_date=start_date, end_date=end_date)
         
         duration_ms = (time.time() - start_time) * 1000
         output_params = {
