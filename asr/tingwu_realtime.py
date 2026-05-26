@@ -1,0 +1,799 @@
+"""通义听悟实时记录：CreateTask API + MeetingJoinUrl WebSocket 推流。"""
+
+
+
+from __future__ import annotations
+
+
+
+import asyncio
+
+import json
+
+import time
+
+import uuid
+
+from typing import Awaitable, Callable, Optional
+
+
+
+import websockets
+
+from aliyunsdkcore.auth.credentials import AccessKeyCredential
+
+from aliyunsdkcore.client import AcsClient
+
+from aliyunsdkcore.request import CommonRequest
+
+
+
+from config.config import (
+
+    tingwu_access_key_id,
+
+    tingwu_access_key_secret,
+
+    tingwu_app_key,
+
+    tingwu_audio_format,
+
+    tingwu_domain,
+
+    tingwu_region,
+
+    tingwu_sample_rate,
+
+    tingwu_source_language,
+
+    tingwu_transcription_output_level,
+
+)
+
+from utils.logger import get_logger
+
+
+
+logger = get_logger("tingwu_realtime")
+
+
+
+SUCCESS_STATUS = 20000000
+
+# 听悟 SDK 示例按约 100ms/3200 字节分包推流
+
+AUDIO_CHUNK_BYTES = 3200
+
+
+
+OnResultCallback = Callable[[str, str, bool], Awaitable[None]]
+
+OnErrorCallback = Callable[[str], Awaitable[None]]
+
+
+
+
+
+class TingwuTaskError(Exception):
+
+    """听悟实时任务失败。"""
+
+
+
+    def __init__(self, message: str, detail: Optional[dict] = None):
+
+        super().__init__(message)
+
+        self.detail = detail or {}
+
+
+
+
+
+def _create_common_request(method: str, uri: str) -> CommonRequest:
+
+    request = CommonRequest()
+
+    request.set_accept_format("json")
+
+    request.set_domain(tingwu_domain)
+
+    request.set_version("2023-09-30")
+
+    request.set_protocol_type("https")
+
+    request.set_method(method)
+
+    request.set_uri_pattern(uri)
+
+    request.add_header("Content-Type", "application/json")
+
+    return request
+
+
+
+
+
+def _build_create_task_body(task_key: str) -> dict:
+
+    return {
+
+        "AppKey": tingwu_app_key,
+
+        "Input": {
+
+            "Format": tingwu_audio_format,
+
+            "SampleRate": tingwu_sample_rate,
+
+            "SourceLanguage": tingwu_source_language,
+
+            "TaskKey": task_key,
+
+        },
+
+        "Parameters": {
+
+            "Transcription": {
+
+                "OutputLevel": tingwu_transcription_output_level,
+
+            },
+
+        },
+
+    }
+
+
+
+
+
+def _create_realtime_task_sync() -> dict:
+
+    if not tingwu_access_key_id or not tingwu_access_key_secret:
+
+        raise ValueError("请配置 ALIBABA_CLOUD_ACCESS_KEY_ID 与 ALIBABA_CLOUD_ACCESS_KEY_SECRET")
+
+    if not tingwu_app_key:
+
+        raise ValueError("请配置 TINGWU_APP_KEY")
+
+
+
+    task_key = f"task_{int(time.time() * 1000)}"
+
+    credentials = AccessKeyCredential(tingwu_access_key_id, tingwu_access_key_secret)
+
+    client = AcsClient(region_id=tingwu_region, credential=credentials)
+
+
+
+    request = _create_common_request("PUT", "/openapi/tingwu/v2/tasks")
+
+    request.add_query_param("type", "realtime")
+
+    request.set_content(json.dumps(_build_create_task_body(task_key), ensure_ascii=False).encode("utf-8"))
+
+
+
+    raw = client.do_action_with_exception(request)
+
+    body = json.loads(raw)
+
+    if body.get("Code") != "0":
+
+        raise RuntimeError(
+
+            f"创建听悟实时任务失败: {body.get('Message')} (code={body.get('Code')})"
+
+        )
+
+    data = body.get("Data") or {}
+
+    task_id = data.get("TaskId")
+
+    meeting_join_url = data.get("MeetingJoinUrl")
+
+    if not task_id or not meeting_join_url:
+
+        raise RuntimeError(f"听悟返回数据不完整: {body}")
+
+    return {
+
+        "TaskId": task_id,
+
+        "TaskKey": data.get("TaskKey") or task_key,
+
+        "MeetingJoinUrl": meeting_join_url,
+
+    }
+
+
+
+
+
+def _stop_realtime_task_sync(task_id: str) -> None:
+
+    if not task_id:
+
+        return
+
+    credentials = AccessKeyCredential(tingwu_access_key_id, tingwu_access_key_secret)
+
+    client = AcsClient(region_id=tingwu_region, credential=credentials)
+
+
+
+    request = _create_common_request("PUT", "/openapi/tingwu/v2/tasks")
+
+    request.add_query_param("type", "realtime")
+
+    request.add_query_param("operation", "stop")
+
+    stop_body = {
+
+        "AppKey": tingwu_app_key,
+
+        "Input": {"TaskId": task_id},
+
+    }
+
+    request.set_content(json.dumps(stop_body, ensure_ascii=False).encode("utf-8"))
+
+
+
+    raw = client.do_action_with_exception(request)
+
+    body = json.loads(raw)
+
+    if body.get("Code") != "0":
+
+        logger.warning(
+
+            "结束听悟实时任务返回非成功",
+
+            extra={"output_params": {"code": body.get("Code"), "message": body.get("Message")}},
+
+        )
+
+
+
+
+
+def _speech_message(name: str, payload: Optional[dict] = None) -> str:
+
+    msg = {
+
+        "header": {
+
+            "name": name,
+
+            "namespace": "SpeechTranscriber",
+
+            "message_id": str(uuid.uuid4()),
+
+        },
+
+        "payload": payload or {},
+
+    }
+
+    return json.dumps(msg, ensure_ascii=False)
+
+
+
+
+
+def _extract_sentence_text(payload: dict) -> str:
+
+    text = str(payload.get("result") or "").strip()
+
+    stash = payload.get("stash_result") or {}
+
+    if isinstance(stash, dict):
+
+        stash_text = str(stash.get("text") or "").strip()
+
+        if stash_text:
+
+            text = f"{text}{stash_text}"
+
+    return text
+
+
+
+
+
+def _extract_error_message(data: dict) -> str:
+
+    header = data.get("header") or {}
+
+    payload = data.get("payload") or {}
+
+    output = payload.get("output") or {}
+
+
+
+    parts: list[str] = []
+
+    for key in ("status_text", "status_message"):
+
+        if header.get(key):
+
+            parts.append(str(header[key]))
+
+    for key in ("message", "status_text"):
+
+        if payload.get(key):
+
+            parts.append(str(payload[key]))
+
+    if output.get("errorMessage"):
+
+        code = output.get("errorCode", "")
+
+        parts.append(f"{code}: {output['errorMessage']}".strip(": "))
+
+
+
+    if parts:
+
+        return " | ".join(parts)
+
+    return str(header.get("name") or "听悟转写失败")
+
+
+
+
+
+class TingwuStreamingSession:
+
+    """单路实时转写：连接 MeetingJoinUrl，推 PCM 并解析识别事件。"""
+
+
+
+    def __init__(
+
+        self,
+
+        on_result: Optional[OnResultCallback] = None,
+
+        on_error: Optional[OnErrorCallback] = None,
+
+    ):
+
+        self.on_result = on_result
+
+        self.on_error = on_error
+
+        self.task_id: Optional[str] = None
+
+        self.meeting_join_url: Optional[str] = None
+
+        self._ws = None
+
+        self._recv_task: Optional[asyncio.Task] = None
+
+        self._started_event = asyncio.Event()
+
+        self._completed_text = ""
+
+        self._closed = False
+
+        self._task_failed = False
+
+        self.last_error: Optional[str] = None
+
+
+
+    @property
+
+    def total_text(self) -> str:
+
+        return self._completed_text
+
+
+
+    @property
+
+    def is_ready(self) -> bool:
+
+        return self._started_event.is_set() and not self._closed and not self._task_failed
+
+
+
+    async def start(self) -> None:
+
+        loop = asyncio.get_event_loop()
+
+        task_info = await loop.run_in_executor(None, _create_realtime_task_sync)
+
+        self.task_id = task_info["TaskId"]
+
+        self.meeting_join_url = task_info["MeetingJoinUrl"]
+
+
+
+        logger.info(
+
+            "听悟实时任务已创建",
+
+            extra={"output_params": {"task_id": self.task_id}},
+
+        )
+
+
+
+        self._ws = await websockets.connect(
+
+            self.meeting_join_url,
+
+            ping_interval=20,
+
+            ping_timeout=20,
+
+            max_size=10 * 1024 * 1024,
+
+        )
+
+        # 先启动接收循环，避免错过 TranscriptionStarted
+
+        self._recv_task = asyncio.create_task(self._receive_loop())
+
+
+
+        # 与官方网页示例一致：payload 仅传 format（采样率在 CreateTask 中已指定）
+
+        await self._ws.send(
+
+            _speech_message("StartTranscription", {"format": tingwu_audio_format})
+
+        )
+
+
+
+        try:
+
+            await asyncio.wait_for(self._started_event.wait(), timeout=15.0)
+
+        except asyncio.TimeoutError as exc:
+
+            raise TingwuTaskError(
+
+                "等待 TranscriptionStarted 超时，请检查 TINGWU_APP_KEY 与听悟服务是否已开通"
+
+            ) from exc
+
+
+
+        logger.info("听悟推流通道已就绪", extra={"output_params": {"task_id": self.task_id}})
+
+
+
+    async def _receive_loop(self) -> None:
+
+        assert self._ws is not None
+
+        try:
+
+            async for message in self._ws:
+
+                if isinstance(message, bytes):
+
+                    continue
+
+                try:
+
+                    data = json.loads(message)
+
+                except json.JSONDecodeError:
+
+                    continue
+
+                await self._handle_event(data)
+
+        except asyncio.CancelledError:
+
+            pass
+
+        except websockets.ConnectionClosed:
+
+            logger.info("听悟 WebSocket 连接已关闭")
+
+        except Exception as e:
+
+            logger.error(f"听悟接收循环异常: {e}", exc_info=True)
+
+
+
+    async def _fail(self, message: str, data: Optional[dict] = None) -> None:
+
+        self._task_failed = True
+
+        self._closed = True
+
+        self.last_error = message
+
+        logger.error(
+
+            "听悟转写失败",
+
+            extra={"output_params": {"error": message, "event": data}},
+
+        )
+
+        if self.on_error:
+
+            await self.on_error(message)
+
+
+
+    async def _handle_event(self, data: dict) -> None:
+
+        header = data.get("header") or {}
+
+        name = header.get("name", "")
+
+        payload = data.get("payload") or {}
+
+        status = header.get("status")
+
+
+
+        if name in ("TaskFailed", "TranscriptionFailed"):
+
+            await self._fail(_extract_error_message(data), data)
+
+            return
+
+
+
+        if status is not None:
+
+            try:
+
+                status_code = int(status)
+
+            except (TypeError, ValueError):
+
+                status_code = None
+
+            if status_code is not None and status_code != SUCCESS_STATUS:
+
+                await self._fail(_extract_error_message(data), data)
+
+                return
+
+
+
+        if name == "TranscriptionStarted":
+
+            self._started_event.set()
+
+            return
+
+
+
+        if name == "TranscriptionResultChanged":
+
+            partial = str(payload.get("result") or "").strip()
+
+            if partial and self.on_result:
+
+                await self.on_result(partial, self._completed_text, False)
+
+            return
+
+
+
+        if name == "SentenceEnd":
+
+            sentence = _extract_sentence_text(payload)
+
+            if sentence:
+
+                self._completed_text += sentence
+
+                if self.on_result:
+
+                    await self.on_result(sentence, self._completed_text, True)
+
+            return
+
+
+
+        if name == "TranscriptionCompleted":
+
+            self._closed = True
+
+            return
+
+
+
+    async def send_audio(self, audio_bytes: bytes, sample_rate: int = 16000) -> None:
+
+        if not audio_bytes or self._closed or self._task_failed or not self._ws:
+
+            return
+
+        if not self._started_event.is_set():
+
+            return
+
+        if sample_rate != tingwu_sample_rate:
+
+            logger.debug(
+
+                f"音频采样率 {sample_rate} 与配置 {tingwu_sample_rate} 不一致"
+
+            )
+
+
+
+        try:
+
+            for offset in range(0, len(audio_bytes), AUDIO_CHUNK_BYTES):
+
+                chunk = audio_bytes[offset : offset + AUDIO_CHUNK_BYTES]
+
+                await self._ws.send(chunk)
+
+        except websockets.ConnectionClosed:
+
+            self._closed = True
+
+            if not self._task_failed:
+
+                logger.warning("听悟连接已关闭，停止发送音频")
+
+
+
+    async def send_keepalive(self) -> None:
+        """发送静音 PCM，避免 StartTranscription 后长时间无音频触发 IDLE_TIMEOUT。"""
+        await self.send_audio(bytes(AUDIO_CHUNK_BYTES))
+
+    async def finalize(self) -> str:
+
+        """发送 StopTranscription，等待句末结果并结束听悟任务。"""
+
+        if not self.task_id:
+
+            return ""
+
+        if self._closed and not self._ws:
+
+            return ""
+
+
+
+        self._closed = True
+
+
+
+        if self._ws is not None:
+
+            try:
+
+                await self._ws.send(_speech_message("StopTranscription"))
+
+                await asyncio.sleep(1.5)
+
+            except websockets.ConnectionClosed:
+
+                pass
+
+            except Exception as e:
+
+                logger.warning(f"发送 StopTranscription 失败: {e}")
+
+
+
+        if self._recv_task and not self._recv_task.done():
+
+            try:
+
+                await asyncio.wait_for(asyncio.shield(self._recv_task), timeout=3.0)
+
+            except asyncio.TimeoutError:
+
+                self._recv_task.cancel()
+
+                try:
+
+                    await self._recv_task
+
+                except asyncio.CancelledError:
+
+                    pass
+
+
+
+        if self._ws:
+
+            try:
+
+                await self._ws.close()
+
+            except Exception:
+
+                pass
+
+            self._ws = None
+
+
+
+        if self.task_id:
+
+            loop = asyncio.get_event_loop()
+
+            try:
+
+                await loop.run_in_executor(None, _stop_realtime_task_sync, self.task_id)
+
+            except Exception as e:
+
+                logger.error(f"结束听悟任务 API 失败: {e}", exc_info=True)
+
+
+
+        if self._task_failed and self.last_error:
+
+            raise TingwuTaskError(self.last_error)
+
+
+
+        return ""
+
+
+
+
+
+class TingwuRealtimeEngine:
+
+    """实时转写引擎门面，接口与 FunASREngine 流式方法对齐。"""
+
+
+
+    def create_streaming_session(
+
+        self,
+
+        on_result: Optional[OnResultCallback] = None,
+
+        on_error: Optional[OnErrorCallback] = None,
+
+    ) -> TingwuStreamingSession:
+
+        return TingwuStreamingSession(on_result=on_result, on_error=on_error)
+
+
+
+    async def start_session_async(self, session: TingwuStreamingSession) -> None:
+
+        await session.start()
+
+    async def send_keepalive_async(self, session: TingwuStreamingSession) -> None:
+
+        await session.send_keepalive()
+
+    async def feed_stream_async(
+
+        self, session: TingwuStreamingSession, audio_bytes: bytes, sample_rate: int
+
+    ) -> str:
+
+        if session._task_failed:
+
+            return ""
+
+        await session.send_audio(audio_bytes, sample_rate)
+
+        return ""
+
+
+
+    async def finalize_stream_async(self, session: TingwuStreamingSession) -> str:
+
+        return await session.finalize()
+
+

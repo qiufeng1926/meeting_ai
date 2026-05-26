@@ -56,3 +56,16 @@ db_charset = _env("DB_CHARSET", "utf8mb4")
 
 # 构建数据库连接URL
 database_url = f"mysql+pymysql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}?charset={db_charset}"
+
+# 通义听悟实时转写（CreateTask + MeetingJoinUrl WebSocket）
+tingwu_access_key_id = _env("ALIBABA_CLOUD_ACCESS_KEY_ID", "")
+tingwu_access_key_secret = _env("ALIBABA_CLOUD_ACCESS_KEY_SECRET", "")
+tingwu_app_key = _env("TINGWU_APP_KEY", "")
+tingwu_region = _env("TINGWU_REGION", "cn-beijing")
+tingwu_domain = _env("TINGWU_DOMAIN", "tingwu.cn-beijing.aliyuncs.com")
+tingwu_source_language = _env("TINGWU_SOURCE_LANGUAGE", "cn")
+tingwu_audio_format = _env("TINGWU_AUDIO_FORMAT", "pcm")
+tingwu_sample_rate = int(_env("TINGWU_SAMPLE_RATE", "16000") or "16000")
+tingwu_transcription_output_level = int(
+    _env("TINGWU_TRANSCRIPTION_OUTPUT_LEVEL", "2") or "2"
+)

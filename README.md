@@ -62,7 +62,14 @@ GLM_API_KEY=your_api_key_here
 GLM_MODEL=glm-4-flash
 GLM_TEMPERATURE=0.3
 
-# ASR 配置
+# 通义听悟实时转写（WebSocket 实时会议）
+ALIBABA_CLOUD_ACCESS_KEY_ID=your_access_key_id
+ALIBABA_CLOUD_ACCESS_KEY_SECRET=your_access_key_secret
+TINGWU_APP_KEY=your_tingwu_appkey
+TINGWU_SOURCE_LANGUAGE=cn
+TINGWU_TRANSCRIPTION_OUTPUT_LEVEL=2
+
+# ASR 配置（批量上传）
 ASR_MODEL_NAME=paraformer-zh
 ASR_DEVICE=cpu
 FFMPEG_PATH=D:\AI\ffmpeg-8.1.1-essentials_build\bin
@@ -293,7 +300,8 @@ meeting_ai/
 │       ├── meeting.py     # 批量处理接口
 │       └── websocket.py   # WebSocket 实时转写 + 历史会议
 ├── asr/                   # 语音识别引擎
-│   └── engine.py          # FunASR 封装（批量+流式）
+│   ├── engine.py          # FunASR 封装（批量上传）
+│   └── tingwu_realtime.py # 通义听悟实时转写
 ├── config/                # 配置管理
 │   └── config.py          # 环境变量配置
 ├── llm/                   # 大语言模型
@@ -318,7 +326,8 @@ meeting_ai/
 ## 🎯 技术栈
 
 - **后端**: FastAPI + Python 3.11+
-- **语音识别**: FunASR (Paraformer-zh)
+- **实时语音识别**: 通义听悟（听悟 OpenAPI + WebSocket 推流）
+- **批量语音识别**: FunASR (Paraformer-zh)
 - **大语言模型**: GLM-4 Flash (智谱 AI)
 - **前端**: HTML5 + CSS3 + JavaScript (原生)
 - **通信**: WebSocket + REST API
@@ -335,8 +344,13 @@ meeting_ai/
 | `GLM_API_KEY` | 智谱 AI API Key | 必填 |
 | `GLM_MODEL` | GLM 模型名称 | `glm-4-flash` |
 | `GLM_TEMPERATURE` | 温度参数（0-1） | `0.3` |
-| `ASR_MODEL_NAME` | ASR 模型名称 | `paraformer-zh` |
-| `ASR_DEVICE` | 运行设备 | `cpu` |
+| `ALIBABA_CLOUD_ACCESS_KEY_ID` | 阿里云 AccessKey ID（听悟实时） | 必填 |
+| `ALIBABA_CLOUD_ACCESS_KEY_SECRET` | 阿里云 AccessKey Secret | 必填 |
+| `TINGWU_APP_KEY` | 听悟控制台 AppKey | 必填 |
+| `TINGWU_SOURCE_LANGUAGE` | 源语言（cn/en/yue/ja/ko 等） | `cn` |
+| `TINGWU_TRANSCRIPTION_OUTPUT_LEVEL` | 1=仅完整句，2=含中间结果 | `2` |
+| `ASR_MODEL_NAME` | 批量 ASR 模型名称 | `paraformer-zh` |
+| `ASR_DEVICE` | 批量 ASR 运行设备 | `cpu` |
 | `FFMPEG_PATH` | FFmpeg 路径 | 需配置 |
 | `UPLOAD_DIR` | 上传目录 | `upload` |
 | `OUTPUT_DIR` | 输出目录 | `output` |

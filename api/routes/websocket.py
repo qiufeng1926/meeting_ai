@@ -29,7 +29,7 @@ def _find_transcript_by_file_id(transcripts_dir: str, file_id: str) -> tuple[str
     return None, None
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from utils.logger import get_logger
-from asr.engine import FunASREngine
+from asr.tingwu_realtime import TingwuRealtimeEngine, TingwuTaskError
 from llm.glm_chat import GLMClient
 from config.config import output_dir
 from db.session import save_meeting_to_db
@@ -37,8 +37,8 @@ from db.session import save_meeting_to_db
 router = APIRouter()
 logger = get_logger("websocket_route")
 
-# 初始化引擎
-asr_engine = FunASREngine()
+# 实时转写使用通义听悟；批量上传仍使用 FunASR（见 meeting.py）
+tingwu_engine = TingwuRealtimeEngine()
 glm_client = GLMClient()
 
 
@@ -112,9 +112,7 @@ async def websocket_transcribe(websocket: WebSocket):
     start_time = time.time()
     connection_id = str(uuid.uuid4())
     await manager.connect(websocket, connection_id)
-    
-    # 会话信息（每连接独立的流式识别器，含 VAD 与音频缓冲）
-    transcriber = asr_engine.create_streaming_session()
+
     session_info = {
         "connection_id": connection_id,
         "start_time": datetime.now().isoformat(),
@@ -122,12 +120,59 @@ async def websocket_transcribe(websocket: WebSocket):
         "file_id": None,
         "meeting_name": None,
         "audio_chunks": 0,
-        "transcriber": transcriber,
+        "transcriber": None,
+        "tingwu_failed": False,
+        "tingwu_started": False,
     }
-    
-    logger.info(f"开始实时语音转写会话", extra={'request_id': connection_id, 'input_params': {'connection_id': connection_id}})
-    
+    tingwu_start_lock = asyncio.Lock()
+
+    async def on_tingwu_result(display_text: str, total_text: str, is_sentence_end: bool):
+        if is_sentence_end:
+            session_info["total_text"] = total_text
+        await manager.send_json(connection_id, {
+            "type": "result",
+            "text": display_text,
+            "total_text": total_text if is_sentence_end else session_info["total_text"],
+            "timestamp": datetime.now().isoformat(),
+        })
+
+    async def on_tingwu_error(error_message: str):
+        session_info["tingwu_failed"] = True
+        await manager.send_json(connection_id, {
+            "type": "error",
+            "message": f"听悟转写失败: {error_message}",
+        })
+
+    transcriber = tingwu_engine.create_streaming_session(
+        on_result=on_tingwu_result,
+        on_error=on_tingwu_error,
+    )
+    session_info["transcriber"] = transcriber
+
+    async def ensure_tingwu_started() -> None:
+        """在用户开始录音后再连接听悟，避免 StartTranscription 后长时间无音频触发 IDLE_TIMEOUT。"""
+        if session_info["tingwu_started"] or session_info.get("tingwu_failed"):
+            return
+        async with tingwu_start_lock:
+            if session_info["tingwu_started"] or session_info.get("tingwu_failed"):
+                return
+            await tingwu_engine.start_session_async(transcriber)
+            await tingwu_engine.send_keepalive_async(transcriber)
+            session_info["tingwu_started"] = True
+            logger.info(
+                "听悟推流已启动",
+                extra={"request_id": connection_id, "output_params": {"task_id": transcriber.task_id}},
+            )
+            await manager.send_json(connection_id, {
+                "type": "tingwu_ready",
+                "message": "听悟转写通道已就绪",
+            })
+
     try:
+        logger.info(
+            "实时转写 WebSocket 已连接，等待开始录音",
+            extra={"request_id": connection_id},
+        )
         while True:
             # 接收客户端消息（前端使用 JSON 文本帧，非二进制）
             raw_message = await websocket.receive()
@@ -155,40 +200,28 @@ async def websocket_transcribe(websocket: WebSocket):
                         session_info["meeting_name"] = meeting_name
                         logger.info(f"设置会议名称", extra={'request_id': connection_id, 'input_params': {'meeting_name': meeting_name}})
                     continue
-                
+
+                if message.get("type") == "record_start":
+                    await ensure_tingwu_started()
+                    continue
+
                 if message.get("type") == "audio":
+                    if session_info.get("tingwu_failed"):
+                        continue
+                    await ensure_tingwu_started()
                     audio_bytes = bytes(message.get("data", []))
                     sample_rate = message.get("sample_rate", 16000)
                     session_info["audio_chunks"] += 1
-                    
-                    text = await asr_engine.feed_stream_async(
+
+                    await tingwu_engine.feed_stream_async(
                         session_info["transcriber"], audio_bytes, sample_rate
                     )
-                    
-                    if text:
-                        session_info["total_text"] += text
-                        result = {
-                            "type": "result",
-                            "text": text,
-                            "total_text": session_info["total_text"],
-                            "timestamp": datetime.now().isoformat(),
-                        }
-                        if not await manager.send_json(connection_id, result):
-                            raise WebSocketDisconnect()
-                        
+                    session_info["total_text"] = session_info["transcriber"].total_text
+
                 elif message.get("type") == "end":
-                    # 冲刷缓冲区中剩余音频
-                    final_text = await asr_engine.finalize_stream_async(
-                        session_info["transcriber"]
-                    )
-                    if final_text:
-                        session_info["total_text"] += final_text
-                        await manager.send_json(connection_id, {
-                            "type": "result",
-                            "text": final_text,
-                            "total_text": session_info["total_text"],
-                            "timestamp": datetime.now().isoformat(),
-                        })
+                    if session_info["tingwu_started"]:
+                        await tingwu_engine.finalize_stream_async(session_info["transcriber"])
+                        session_info["total_text"] = session_info["transcriber"].total_text
 
                     # 会话结束，生成 AI 总结
                     duration_ms = (time.time() - start_time) * 1000
@@ -357,17 +390,11 @@ async def websocket_transcribe(websocket: WebSocket):
             except (json.JSONDecodeError, UnicodeDecodeError):
                 # 原始 PCM 二进制帧
                 try:
-                    text = await asr_engine.feed_stream_async(
+                    await ensure_tingwu_started()
+                    await tingwu_engine.feed_stream_async(
                         session_info["transcriber"], data, 16000
                     )
-                    if text:
-                        session_info["total_text"] += text
-                        await manager.send_json(connection_id, {
-                            "type": "result",
-                            "text": text,
-                            "total_text": session_info["total_text"],
-                            "timestamp": datetime.now().isoformat(),
-                        })
+                    session_info["total_text"] = session_info["transcriber"].total_text
                 except Exception as e:
                     logger.error(f"处理音频数据失败: {e}")
                     await manager.send_json(connection_id, {
@@ -383,10 +410,34 @@ async def websocket_transcribe(websocket: WebSocket):
             logger.info(f"WebSocket 已关闭", extra={'request_id': connection_id})
         else:
             raise
+    except TingwuTaskError as e:
+        duration_ms = (time.time() - start_time) * 1000
+        logger.error(
+            f"听悟任务失败: {e}",
+            extra={
+                "request_id": connection_id,
+                "output_params": {"duration_ms": round(duration_ms, 2)},
+            },
+        )
+        await manager.send_json(connection_id, {
+            "type": "error",
+            "message": str(e),
+        })
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
         logger.error(f"WebSocket 错误", exc_info=True, extra={'request_id': connection_id, 'output_params': {'error': str(e), 'error_type': type(e).__name__, 'duration_ms': round(duration_ms, 2)}})
+        if not getattr(session_info.get("transcriber"), "task_id", None):
+            await manager.send_json(connection_id, {
+                "type": "error",
+                "message": f"听悟实时转写启动失败: {e}",
+            })
     finally:
+        transcriber = session_info.get("transcriber")
+        if transcriber is not None and session_info.get("tingwu_started"):
+            try:
+                await tingwu_engine.finalize_stream_async(transcriber)
+            except Exception as e:
+                logger.warning(f"听悟会话收尾失败: {e}", extra={"request_id": connection_id})
         manager.disconnect(connection_id)
         logger.info(f"会话清理完成", extra={'request_id': connection_id})
 

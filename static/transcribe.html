@@ -505,7 +505,8 @@
         
         // 连接 WebSocket
         function connectWebSocket(meetingName = '') {
-            const wsUrl = `ws://${window.location.host}/api/ws/transcribe`;
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host}/api/ws/transcribe`;
             ws = new WebSocket(wsUrl);
             
             ws.onopen = () => {
@@ -618,6 +619,9 @@
 
         function cleanupMediaOnly() {
             if (!mediaRecorder) return;
+            if (mediaRecorder.flushTimer) {
+                clearInterval(mediaRecorder.flushTimer);
+            }
             mediaRecorder.stream.getTracks().forEach(track => track.stop());
             try {
                 mediaRecorder.processor.disconnect();
@@ -703,7 +707,7 @@
         
         const TARGET_SAMPLE_RATE = 16000;
         const SILENCE_RMS_THRESHOLD = 0.003;
-        const SEND_BUFFER_SAMPLES = 9600; // 约 600ms @ 16kHz，与 FunASR 流式 chunk 对齐
+        const SEND_BUFFER_SAMPLES = 9600; // 约 600ms @ 16kHz PCM，与听悟推流分包建议对齐
 
         function calcRms(samples) {
             let sum = 0;
@@ -779,37 +783,48 @@
                 
                 source.connect(processor);
                 processor.connect(audioContext.destination);
-                
+
+                function flushPcmSendBuffer(force) {
+                    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+                    if (!force && pcmSendBuffer.length < SEND_BUFFER_SAMPLES) return;
+                    if (pcmSendBuffer.length === 0) return;
+
+                    const take = force
+                        ? pcmSendBuffer.splice(0, pcmSendBuffer.length)
+                        : pcmSendBuffer.splice(0, SEND_BUFFER_SAMPLES);
+                    ws.send(JSON.stringify({
+                        type: 'audio',
+                        data: floatToPcmBytes(new Float32Array(take)),
+                        sample_rate: TARGET_SAMPLE_RATE
+                    }));
+                }
+
                 processor.onaudioprocess = (e) => {
                     if (!isRecording || !ws || ws.readyState !== WebSocket.OPEN) return;
-                    
+
                     const inputData = e.inputBuffer.getChannelData(0);
                     const resampled = resampleTo16k(inputData, sourceSampleRate);
-
-                    // 静音时不发送，减少无效识别
-                    if (calcRms(resampled) < SILENCE_RMS_THRESHOLD) {
-                        return;
-                    }
 
                     for (let i = 0; i < resampled.length; i++) {
                         pcmSendBuffer.push(resampled[i]);
                     }
 
-                    if (pcmSendBuffer.length < SEND_BUFFER_SAMPLES) {
-                        return;
+                    // 有语音时尽快发送；静音也依赖定时 flush，避免听悟 IDLE_TIMEOUT
+                    const hasSpeech = calcRms(resampled) >= SILENCE_RMS_THRESHOLD;
+                    if (hasSpeech && pcmSendBuffer.length >= SEND_BUFFER_SAMPLES) {
+                        flushPcmSendBuffer(false);
                     }
-
-                    const chunk = pcmSendBuffer.splice(0, SEND_BUFFER_SAMPLES);
-                    const message = {
-                        type: 'audio',
-                        data: floatToPcmBytes(new Float32Array(chunk)),
-                        sample_rate: TARGET_SAMPLE_RATE
-                    };
-                    
-                    ws.send(JSON.stringify(message));
                 };
-                
-                mediaRecorder = { stream, processor, source, pcmSendBuffer };
+
+                // 麦克风就绪后再启动听悟，并周期性发送音频（含静音）保活
+                ws.send(JSON.stringify({ type: 'record_start' }));
+
+                const flushTimer = setInterval(() => {
+                    if (!isRecording) return;
+                    flushPcmSendBuffer(true);
+                }, 500);
+
+                mediaRecorder = { stream, processor, source, pcmSendBuffer, flushTimer };
                 isRecording = true;
                 
                 startBtn.disabled = true;
@@ -830,16 +845,18 @@
             isRecording = false;
             
             if (mediaRecorder) {
-                // 发送缓冲区剩余音频
                 if (
                     mediaRecorder.pcmSendBuffer &&
                     mediaRecorder.pcmSendBuffer.length > 0 &&
                     ws &&
                     ws.readyState === WebSocket.OPEN
                 ) {
+                    const tail = mediaRecorder.pcmSendBuffer.splice(
+                        0, mediaRecorder.pcmSendBuffer.length
+                    );
                     ws.send(JSON.stringify({
                         type: 'audio',
-                        data: floatToPcmBytes(new Float32Array(mediaRecorder.pcmSendBuffer)),
+                        data: floatToPcmBytes(new Float32Array(tail)),
                         sample_rate: TARGET_SAMPLE_RATE
                     }));
                 }

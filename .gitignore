@@ -6,4 +6,4 @@ upload/*
 __pycache__/
 *.db
 .DS_Store
-/.env
+.env
