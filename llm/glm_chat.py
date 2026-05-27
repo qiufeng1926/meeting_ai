@@ -54,6 +54,7 @@ class GLMClient:
                 }
             ],
             temperature=temperature,
+            top_p=0.85,
         )
 
         return response.choices[0].message.content

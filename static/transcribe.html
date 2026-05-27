@@ -576,7 +576,7 @@
             </div>
                     
             <div id="realtimeSummary" class="summary-container" style="display: none;">
-                <div class="summary-title">📝 AI 会议纪要</div>
+                <div class="summary-title">📝 AI 智能速览</div>
                 <div id="realtimeSummaryText" class="summary-content"></div>
             </div>
                     
@@ -585,7 +585,7 @@
                 <ul>
                     <li>点击“开始录音”按钮开始实时语音转写</li>
                     <li>说话时会自动识别并显示文本</li>
-                    <li>点击“停止录音”后会自动生成 AI 会议纪要</li>
+                    <li>点击“停止录音”后会自动生成 AI 智能速览</li>
                     <li>支持中文语音识别</li>
                 </ul>
             </div>
@@ -629,7 +629,7 @@
             </div>
             
             <div id="summaryResult" class="summary-container" style="display: none;">
-                <div class="summary-title">📝 AI 会议纪要</div>
+                <div class="summary-title">📝 AI 智能速览</div>
                 <div id="summaryText" class="summary-content"></div>
             </div>
             
@@ -1203,12 +1203,12 @@
                 if (data.total_text) {
                     totalTextEl.textContent = data.total_text;
                 }
-                currentTextEl.textContent = '转写完成，正在生成 AI 会议纪要...';
+                currentTextEl.textContent = '转写完成，正在生成 AI 智能速览...';
             } else if (data.type === 'generating_summary') {
                 if (data.file_id) {
                     pendingFileId = data.file_id;
                 }
-                currentTextEl.textContent = data.message || '正在生成 AI 会议纪要...';
+                currentTextEl.textContent = data.message || '正在生成 AI 智能速览...';
                 stopBtn.disabled = true;
                 stopBtn.innerHTML = '<span class="loading"></span>生成中...';
                 // 兜底：WebSocket 长时间无响应时通过 HTTP 拉取结果
@@ -1631,7 +1631,7 @@
                     if (data.summary) {
                         html += `
                             <div style="margin-bottom: 30px;">
-                                <h3 style="color: #f57c00; margin-bottom: 15px;">📊 AI 会议纪要</h3>
+                                <h3 style="color: #f57c00; margin-bottom: 15px;">📊 AI 智能速览</h3>
                                 <div style="background: #fff9e6; padding: 20px; border-radius: 10px; line-height: 1.8; white-space: pre-wrap; border-left: 4px solid #ffa726;">${data.summary}</div>
                             </div>
                         `;

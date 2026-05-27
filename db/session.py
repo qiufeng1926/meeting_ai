@@ -123,7 +123,17 @@ def update_meeting_status(file_id: str, status: str, error_message: str = None):
             logger.warning(f"未找到会议记录: file_id={file_id}")
 
 
-def get_meeting_by_file_id(file_id: str) -> Meeting:
+def _detach_instance(session: Session, instance):
+    """在会话关闭前加载属性并分离，避免 DetachedInstanceError"""
+    if instance is None:
+        return None
+    for column in instance.__table__.columns:
+        getattr(instance, column.name)
+    session.expunge(instance)
+    return instance
+
+
+def get_meeting_by_file_id(file_id: str) -> Meeting | None:
     """
     根据file_id获取会议记录
     
@@ -135,7 +145,25 @@ def get_meeting_by_file_id(file_id: str) -> Meeting:
     """
     with get_db_session() as session:
         meeting = session.query(Meeting).filter(Meeting.file_id == file_id).first()
-        return meeting
+        return _detach_instance(session, meeting)
+
+
+def user_can_access_meeting(file_id: str, viewer: User) -> bool:
+    """在同一会话内校验用户是否有权查看会议（会议不存在视为无权限）"""
+    exists, allowed = check_meeting_access(file_id, viewer)
+    return exists and allowed
+
+
+def check_meeting_access(file_id: str, viewer: User) -> tuple[bool, bool]:
+    """返回 (会议是否存在, 是否有权查看)"""
+    with get_db_session() as session:
+        meeting = session.query(Meeting).filter(Meeting.file_id == file_id).first()
+        if not meeting:
+            return False, False
+        owner = None
+        if meeting.user_id:
+            owner = session.query(User).filter(User.id == meeting.user_id).first()
+        return True, can_access_meeting(viewer, meeting, owner)
 
 
 def get_meeting_owner(user_id: int | None) -> User | None:
@@ -143,7 +171,8 @@ def get_meeting_owner(user_id: int | None) -> User | None:
     if user_id is None:
         return None
     with get_db_session() as session:
-        return session.query(User).filter(User.id == user_id).first()
+        user = session.query(User).filter(User.id == user_id).first()
+        return _detach_instance(session, user)
 
 
 def _apply_viewer_meeting_filter(query, session: Session, viewer: User):

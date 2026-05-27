@@ -295,7 +295,7 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
                     })
                     await manager.send_json(connection_id, {
                         "type": "generating_summary",
-                        "message": "正在生成 AI 会议纪要...",
+                        "message": "正在生成 AI 智能速览...",
                         "file_id": file_id,
                     })
 
@@ -544,14 +544,12 @@ async def get_meeting(file_id: str, current_user: User = Depends(get_current_use
     logger.info(f"获取会议详情请求", extra={'request_id': request_id, 'input_params': input_params})
     
     try:
-        from db.session import get_meeting_by_file_id, get_meeting_owner
-        from api.permissions import can_access_meeting
+        from db.session import check_meeting_access
 
-        meeting_record = get_meeting_by_file_id(file_id)
-        if not meeting_record:
+        exists, allowed = check_meeting_access(file_id, current_user)
+        if not exists:
             return {"success": False, "error": "会议不存在"}
-        owner = get_meeting_owner(meeting_record.user_id)
-        if not can_access_meeting(current_user, meeting_record, owner):
+        if not allowed:
             return {"success": False, "error": "无权查看该会议"}
 
         transcripts_dir = os.path.join(output_dir, "transcripts")

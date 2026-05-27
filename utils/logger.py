@@ -106,29 +106,41 @@ class TimestampSizeRotatingHandler(logging.Handler):
         self._open_new_file()
         self._purge_old_files()
 
-    def _active_filepath(self) -> Path:
-        return self.log_dir / f"{self.service_name}.log"
-
     def _new_filepath(self) -> Path:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         return self.log_dir / f"{self.service_name}_{ts}.txt"
+
+    def _find_reusable_file(self) -> Path | None:
+        """uvicorn --reload 重启时复用刚创建的日志，避免一次启动多个文件"""
+        candidates = sorted(
+            self.log_dir.glob(f"{self.service_name}_*.txt"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        now = datetime.now()
+        for path in candidates:
+            if path.stat().st_size >= self.max_bytes:
+                continue
+            mtime = datetime.fromtimestamp(path.stat().st_mtime)
+            if (now - mtime).total_seconds() <= 120:
+                return path
+        return None
 
     def _open_new_file(self) -> None:
         if self.stream:
             self.stream.close()
             self.stream = None
-        active = self._active_filepath()
-        if active.exists() and active.stat().st_size >= self.max_bytes:
-            active.rename(self._new_filepath())
-        self.base_path = active
+        reusable = self._find_reusable_file()
+        self.base_path = reusable if reusable else self._new_filepath()
         self.stream = open(self.base_path, "a", encoding="utf-8")
 
     def _purge_old_files(self) -> None:
         cutoff = datetime.now() - timedelta(days=self.retention_days)
-        active_name = self._active_filepath().name
-        for path in self.log_dir.glob(f"{self.service_name}_*.txt"):
-            if path.name == active_name:
-                continue
+        current = self.base_path.name if self.base_path else None
+        for pattern in (f"{self.service_name}_*.txt", f"{self.service_name}.log"):
+            for path in self.log_dir.glob(pattern):
+                if current and path.name == current:
+                    continue
             try:
                 if datetime.fromtimestamp(path.stat().st_mtime) < cutoff:
                     path.unlink(missing_ok=True)
@@ -146,11 +158,9 @@ class TimestampSizeRotatingHandler(logging.Handler):
                 self.stream.write(msg + self.terminator)
                 self.stream.flush()
                 if self.base_path.stat().st_size >= self.max_bytes:
-                    archived = self._new_filepath()
                     self.stream.close()
-                    self.base_path.rename(archived)
-                    self.stream = open(self._active_filepath(), "a", encoding="utf-8")
-                    self.base_path = self._active_filepath()
+                    self.base_path = self._new_filepath()
+                    self.stream = open(self.base_path, "a", encoding="utf-8")
                     self._purge_old_files()
             finally:
                 self.release()
