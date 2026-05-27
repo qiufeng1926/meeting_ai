@@ -27,7 +27,10 @@ def _find_transcript_by_file_id(transcripts_dir: str, file_id: str) -> tuple[str
         if filename.startswith(file_id) or f"_{file_id}_" in filename:
             return os.path.join(transcripts_dir, filename), filename
     return None, None
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query, HTTPException
+from api.auth_utils import get_user_from_token, get_current_user
+from db.models import User
+from db.session import SessionFactory
 from utils.logger import get_logger
 from asr.tingwu_realtime import TingwuRealtimeEngine, TingwuTaskError
 from llm.glm_chat import GLMClient
@@ -104,17 +107,29 @@ async def _run_with_keepalive(
 
 
 @router.websocket("/ws/transcribe")
-async def websocket_transcribe(websocket: WebSocket):
+async def websocket_transcribe(websocket: WebSocket, token: str = Query(default="")):
     """
     WebSocket 实时语音转文本
     客户端发送音频数据块，服务端返回识别结果
     """
+    db = SessionFactory()
+    try:
+        current_user = get_user_from_token(token, db)
+    finally:
+        db.close()
+
+    if not current_user:
+        await websocket.accept()
+        await websocket.close(code=4001, reason="请先登录")
+        return
+
     start_time = time.time()
     connection_id = str(uuid.uuid4())
     await manager.connect(websocket, connection_id)
 
     session_info = {
         "connection_id": connection_id,
+        "user_id": current_user.id,
         "start_time": datetime.now().isoformat(),
         "total_text": "",
         "file_id": None,
@@ -316,6 +331,7 @@ async def websocket_transcribe(websocket: WebSocket):
                         try:
                             meeting_data = {
                                 'file_id': file_id,
+                                'user_id': session_info["user_id"],
                                 'meeting_name': meeting_name if meeting_name else None,
                                 'original_filename': transcript_filename,
                                 'meeting_type': 'realtime',
@@ -369,6 +385,7 @@ async def websocket_transcribe(websocket: WebSocket):
                         try:
                             meeting_data = {
                                 'file_id': file_id,
+                                'user_id': session_info["user_id"],
                                 'meeting_name': meeting_name if meeting_name else None,
                                 'original_filename': transcript_filename,
                                 'meeting_type': 'realtime',
@@ -463,7 +480,13 @@ async def websocket_status():
 
 
 @router.get("/meetings/list")
-async def list_meetings(start_date: str = None, end_date: str = None, limit: int = 100, offset: int = 0):
+async def list_meetings(
+    start_date: str = None,
+    end_date: str = None,
+    limit: int = 100,
+    offset: int = 0,
+    current_user: User = Depends(get_current_user),
+):
     """获取已保存的会议列表（从数据库检索，支持日期筛选）"""
     start_time = time.time()
     request_id = str(uuid.uuid4())
@@ -479,8 +502,13 @@ async def list_meetings(start_date: str = None, end_date: str = None, limit: int
     try:
         from db.session import get_all_meetings
         
-        # 从数据库获取会议记录（已转换为字典）
-        meetings = get_all_meetings(limit=limit, offset=offset, start_date=start_date, end_date=end_date)
+        meetings = get_all_meetings(
+            limit=limit,
+            offset=offset,
+            start_date=start_date,
+            end_date=end_date,
+            viewer=current_user,
+        )
         
         duration_ms = (time.time() - start_time) * 1000
         output_params = {
@@ -507,7 +535,7 @@ async def list_meetings(start_date: str = None, end_date: str = None, limit: int
 
 
 @router.get("/meetings/{file_id}")
-async def get_meeting(file_id: str):
+async def get_meeting(file_id: str, current_user: User = Depends(get_current_user)):
     """获取指定会议的详细内容"""
     start_time = time.time()
     request_id = str(uuid.uuid4())
@@ -516,6 +544,16 @@ async def get_meeting(file_id: str):
     logger.info(f"获取会议详情请求", extra={'request_id': request_id, 'input_params': input_params})
     
     try:
+        from db.session import get_meeting_by_file_id, get_meeting_owner
+        from api.permissions import can_access_meeting
+
+        meeting_record = get_meeting_by_file_id(file_id)
+        if not meeting_record:
+            return {"success": False, "error": "会议不存在"}
+        owner = get_meeting_owner(meeting_record.user_id)
+        if not can_access_meeting(current_user, meeting_record, owner):
+            return {"success": False, "error": "无权查看该会议"}
+
         transcripts_dir = os.path.join(output_dir, "transcripts")
         summaries_dir = os.path.join(output_dir, "summaries")
         

@@ -3,19 +3,20 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes.meeting import router as meeting_router
-from api.routes.websocket import router as websocket_router
-
 from utils.logger import setup_logging
 
 import os
 
 
-# 初始化日志系统
+# 先于路由模块导入，避免 get_logger 重复初始化日志文件
 logger = setup_logging(
     service_name="meeting_ai",
     console=True,
 )
+
+from api.routes.meeting import router as meeting_router
+from api.routes.websocket import router as websocket_router
+from api.routes.auth import router as auth_router
 
 app = FastAPI(
     title="Meeting AI",
@@ -38,6 +39,12 @@ app.add_middleware(
 logger.info("CORS 跨域已开启")
 
 # 注册路由
+app.include_router(
+    auth_router,
+    prefix="/api",
+    tags=["用户认证"]
+)
+
 app.include_router(
     meeting_router,
     prefix="/api",

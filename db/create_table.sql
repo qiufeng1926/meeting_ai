@@ -60,8 +60,45 @@ DEFAULT CHARSET=utf8mb4
 COLLATE=utf8mb4_unicode_ci 
 COMMENT='会议记录表';
 
+-- 创建用户表
+CREATE TABLE IF NOT EXISTS users (
+    id INT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    username VARCHAR(64) NOT NULL UNIQUE COMMENT '用户名',
+    nickname VARCHAR(64) NOT NULL COMMENT '昵称',
+    password_hash VARCHAR(256) NOT NULL COMMENT '密码哈希',
+    role VARCHAR(20) NOT NULL DEFAULT 'user' COMMENT '角色: user-普通用户, admin-管理员, root-超级管理员',
+    can_view_all TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否可查看所有会议',
+    can_view_root_meetings TINYINT(1) NOT NULL DEFAULT 0 COMMENT '管理员是否可查看超级管理员会议(限3天)',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    INDEX idx_username (username)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户表';
+
+-- 创建权限申请表
+CREATE TABLE IF NOT EXISTS permission_requests (
+    id INT AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID',
+    user_id INT NOT NULL COMMENT '申请人ID',
+    request_type VARCHAR(20) NOT NULL COMMENT '申请类型: view_all-查看全部会议, admin-成为管理员',
+    reason TEXT DEFAULT NULL COMMENT '申请理由',
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' COMMENT '状态: pending-待审批, approved-已通过, rejected-已拒绝',
+    reviewer_id INT DEFAULT NULL COMMENT '审批人ID',
+    review_note TEXT DEFAULT NULL COMMENT '审批备注',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '申请时间',
+    reviewed_at DATETIME DEFAULT NULL COMMENT '审批时间',
+    INDEX idx_user_id (user_id),
+    INDEX idx_status (status),
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    FOREIGN KEY (reviewer_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='权限申请表';
+
+-- 为已有 meetings 表添加 user_id（如不存在）
+-- ALTER TABLE meetings ADD COLUMN user_id INT NULL COMMENT '创建用户ID';
+-- ALTER TABLE meetings ADD INDEX idx_user_id (user_id);
+
 -- 显示表结构
 DESCRIBE meetings;
+DESCRIBE users;
+DESCRIBE permission_requests;
 
 -- 示例查询
 -- SELECT * FROM meetings ORDER BY created_at DESC LIMIT 10;

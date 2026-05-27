@@ -2,16 +2,54 @@
 数据库会话管理
 """
 from contextlib import contextmanager
+from datetime import datetime, timedelta
+
+from sqlalchemy import or_, and_
 from sqlalchemy.orm import Session
-from db.models import init_database, get_session_factory, Meeting
+from db.models import init_database, get_session_factory, Meeting, User, PermissionRequest
 from config.config import database_url
 from utils.logger import get_logger
+from api.permissions import ROOT_MEETING_VIEW_DAYS, can_access_meeting
 
 logger = get_logger("database")
 
 # 初始化数据库引擎和会话工厂
 engine = init_database(database_url)
 SessionFactory = get_session_factory(engine)
+
+
+def seed_default_users(session: Session):
+    """创建默认超级管理员和管理员账号"""
+    from utils.password import hash_password
+
+    defaults = [
+        {'username': 'root', 'nickname': '超级管理员', 'password': 'root2026', 'role': 'root', 'can_view_all': True},
+        {'username': 'admin', 'nickname': '管理员', 'password': '123456', 'role': 'admin', 'can_view_all': True},
+    ]
+    for item in defaults:
+        existing = session.query(User).filter(User.username == item['username']).first()
+        if not existing:
+            session.add(User(
+                username=item['username'],
+                nickname=item['nickname'],
+                password_hash=hash_password(item['password']),
+                role=item['role'],
+                can_view_all=item['can_view_all'],
+            ))
+            logger.info(f"默认用户已创建: {item['username']}")
+        elif not existing.nickname:
+            existing.nickname = item['nickname']
+
+
+try:
+    _seed_session = SessionFactory()
+    try:
+        seed_default_users(_seed_session)
+        _seed_session.commit()
+    finally:
+        _seed_session.close()
+except Exception as e:
+    logger.warning(f"默认用户初始化跳过: {e}")
 
 
 @contextmanager
@@ -42,6 +80,7 @@ def save_meeting_to_db(meeting_data: dict) -> Meeting:
     with get_db_session() as session:
         meeting = Meeting(
             file_id=meeting_data['file_id'],
+            user_id=meeting_data.get('user_id'),
             meeting_name=meeting_data.get('meeting_name'),
             original_filename=meeting_data.get('original_filename'),
             meeting_type=meeting_data.get('meeting_type', 'batch'),
@@ -99,21 +138,65 @@ def get_meeting_by_file_id(file_id: str) -> Meeting:
         return meeting
 
 
-def get_all_meetings(limit: int = 100, offset: int = 0, start_date: str = None, end_date: str = None) -> list:
+def get_meeting_owner(user_id: int | None) -> User | None:
+    """获取会议创建者"""
+    if user_id is None:
+        return None
+    with get_db_session() as session:
+        return session.query(User).filter(User.id == user_id).first()
+
+
+def _apply_viewer_meeting_filter(query, session: Session, viewer: User):
+    """按用户角色过滤可见会议"""
+    if viewer.is_root():
+        return query
+
+    if viewer.role == 'admin':
+        root_ids = [r[0] for r in session.query(User.id).filter(User.role == 'root').all()]
+        cutoff = datetime.now() - timedelta(days=ROOT_MEETING_VIEW_DAYS)
+        conditions = [
+            Meeting.user_id == viewer.id,
+            Meeting.user_id.is_(None),
+        ]
+        if root_ids:
+            conditions.append(
+                and_(Meeting.user_id.isnot(None), ~Meeting.user_id.in_(root_ids))
+            )
+        else:
+            conditions.append(Meeting.user_id.isnot(None))
+        if viewer.can_view_root_meetings and root_ids:
+            conditions.append(
+                and_(Meeting.user_id.in_(root_ids), Meeting.created_at >= cutoff)
+            )
+        return query.filter(or_(*conditions))
+
+    if viewer.can_view_all:
+        return query
+
+    return query.filter(Meeting.user_id == viewer.id)
+
+
+def get_all_meetings(
+    limit: int = 100,
+    offset: int = 0,
+    start_date: str = None,
+    end_date: str = None,
+    viewer: User = None,
+    user_id: int = None,
+    can_view_all: bool = False,
+) -> list:
     """
-    获取所有会议记录（分页，支持日期筛选）
-    
-    Args:
-        limit: 每页数量
-        offset: 偏移量
-        start_date: 开始日期 (YYYY-MM-DD)
-        end_date: 结束日期 (YYYY-MM-DD)
-        
-    Returns:
-        list: 会议记录字典列表
+    获取会议记录（分页，支持日期筛选与权限过滤）
     """
     with get_db_session() as session:
         query = session.query(Meeting)
+
+        if viewer is not None:
+            query = _apply_viewer_meeting_filter(query, session, viewer)
+        elif not can_view_all and user_id is not None:
+            query = query.filter(Meeting.user_id == user_id)
+        elif not can_view_all:
+            query = query.filter(Meeting.user_id.is_(None))
         
         # 添加日期筛选条件
         if start_date:

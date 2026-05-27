@@ -9,8 +9,12 @@ from fastapi import (
     APIRouter,
     UploadFile,
     File,
-    Form
+    Form,
+    Depends,
 )
+
+from api.auth_utils import get_current_user
+from db.models import User
 
 from config.config import upload_dir, output_dir
 from asr.engine import FunASREngine
@@ -34,7 +38,8 @@ os.makedirs(os.path.join(output_dir, "summaries"), exist_ok=True)
 @router.post("/meeting/upload")
 async def upload_meeting_audio(
     file: UploadFile = File(...),
-    meeting_name: str = Form(None)
+    meeting_name: str = Form(None),
+    current_user: User = Depends(get_current_user),
 ):
     """
     异步批量上传音频文件并处理
@@ -119,6 +124,7 @@ async def upload_meeting_audio(
         try:
             meeting_data = {
                 'file_id': file_id,
+                'user_id': current_user.id,
                 'meeting_name': meeting_name,
                 'original_filename': file.filename,
                 'meeting_type': 'batch',

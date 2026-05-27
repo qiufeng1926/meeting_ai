@@ -2,10 +2,85 @@
 数据库模型定义
 """
 from datetime import datetime
-from sqlalchemy import Column, String, Text, Integer, DateTime, Index, create_engine, text
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import Column, String, Text, Integer, DateTime, Index, Boolean, ForeignKey, create_engine, text
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
 Base = declarative_base()
+
+
+class User(Base):
+    """用户表"""
+    __tablename__ = 'users'
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment='主键ID')
+    username = Column(String(64), unique=True, nullable=False, index=True, comment='用户名')
+    nickname = Column(String(64), nullable=False, comment='昵称')
+    password_hash = Column(String(256), nullable=False, comment='密码哈希')
+    role = Column(String(20), nullable=False, default='user', comment='角色: user-普通用户, admin-管理员, root-超级管理员')
+    can_view_all = Column(Boolean, nullable=False, default=False, comment='是否可查看所有会议')
+    can_view_root_meetings = Column(Boolean, nullable=False, default=False, comment='管理员是否可查看超级管理员会议(限3天)')
+    created_at = Column(DateTime, nullable=False, default=datetime.now, comment='创建时间')
+    updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment='更新时间')
+
+    meetings = relationship('Meeting', back_populates='owner')
+    permission_requests = relationship('PermissionRequest', back_populates='applicant', foreign_keys='PermissionRequest.user_id')
+
+    def to_dict(self, include_sensitive=False):
+        data = {
+            'id': self.id,
+            'username': self.username,
+            'nickname': self.nickname,
+            'role': self.role,
+            'can_view_all': self.can_view_all or self.role in ('admin', 'root'),
+            'can_view_root_meetings': self.can_view_root_meetings,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+        if include_sensitive:
+            data['password_hash'] = self.password_hash
+        return data
+
+    def can_view_all_meetings(self) -> bool:
+        return self.role in ('admin', 'root') or self.can_view_all
+
+    def is_admin(self) -> bool:
+        return self.role in ('admin', 'root')
+
+    def is_root(self) -> bool:
+        return self.role == 'root'
+
+
+class PermissionRequest(Base):
+    """权限申请表"""
+    __tablename__ = 'permission_requests'
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment='主键ID')
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True, comment='申请人ID')
+    request_type = Column(String(20), nullable=False, comment='申请类型: view_all-查看全部会议, admin-成为管理员')
+    reason = Column(Text, nullable=True, comment='申请理由')
+    status = Column(String(20), nullable=False, default='pending', comment='状态: pending-待审批, approved-已通过, rejected-已拒绝')
+    reviewer_id = Column(Integer, ForeignKey('users.id'), nullable=True, comment='审批人ID')
+    review_note = Column(Text, nullable=True, comment='审批备注')
+    created_at = Column(DateTime, nullable=False, default=datetime.now, comment='申请时间')
+    reviewed_at = Column(DateTime, nullable=True, comment='审批时间')
+
+    applicant = relationship('User', back_populates='permission_requests', foreign_keys=[user_id])
+    reviewer = relationship('User', foreign_keys=[reviewer_id])
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'username': self.applicant.username if self.applicant else None,
+            'nickname': self.applicant.nickname if self.applicant else None,
+            'request_type': self.request_type,
+            'reason': self.reason,
+            'status': self.status,
+            'reviewer_id': self.reviewer_id,
+            'reviewer_username': self.reviewer.username if self.reviewer else None,
+            'review_note': self.review_note,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'reviewed_at': self.reviewed_at.isoformat() if self.reviewed_at else None,
+        }
 
 
 class Meeting(Base):
@@ -17,6 +92,9 @@ class Meeting(Base):
     
     # 唯一标识
     file_id = Column(String(64), unique=True, nullable=False, index=True, comment='文件唯一ID (UUID)')
+
+    # 创建用户
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True, comment='创建用户ID')
     
     # 会议基本信息
     meeting_name = Column(String(255), nullable=True, comment='会议名称')
@@ -50,9 +128,12 @@ class Meeting(Base):
     status = Column(String(20), nullable=False, default='completed', comment='状态: processing-处理中, completed-已完成, failed-失败')
     error_message = Column(Text, nullable=True, comment='错误信息')
     
+    owner = relationship('User', back_populates='meetings')
+
     # 索引
     __table_args__ = (
         Index('idx_file_id', 'file_id'),
+        Index('idx_user_id', 'user_id'),
         Index('idx_created_at', 'created_at'),
         Index('idx_meeting_type', 'meeting_type'),
         Index('idx_status', 'status'),
@@ -63,6 +144,7 @@ class Meeting(Base):
         return {
             'id': self.id,
             'file_id': self.file_id,
+            'user_id': self.user_id,
             'meeting_name': self.meeting_name,
             'original_filename': self.original_filename,
             'meeting_type': self.meeting_type,
@@ -81,7 +163,52 @@ class Meeting(Base):
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'status': self.status,
             'error_message': self.error_message,
+            'has_summary': bool(self.summary),
+            'preview': (self.transcript or '')[:200],
         }
+
+
+def migrate_schema(engine):
+    """为已有数据库补充新字段/表（create_all 不会修改已有表结构）"""
+    with engine.connect() as conn:
+        result = conn.execute(text("""
+            SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'meetings' AND COLUMN_NAME = 'user_id'
+        """))
+        if result.scalar() == 0:
+            conn.execute(text(
+                "ALTER TABLE meetings ADD COLUMN user_id INT NULL COMMENT '创建用户ID'"
+            ))
+            conn.execute(text("ALTER TABLE meetings ADD INDEX idx_user_id (user_id)"))
+            conn.commit()
+            print("[OK] meetings 表已添加 user_id 字段")
+
+        result = conn.execute(text("""
+            SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'nickname'
+        """))
+        if result.scalar() == 0:
+            conn.execute(text(
+                "ALTER TABLE users ADD COLUMN nickname VARCHAR(64) NULL COMMENT '昵称' AFTER username"
+            ))
+            conn.execute(text("UPDATE users SET nickname = username WHERE nickname IS NULL"))
+            conn.execute(text(
+                "ALTER TABLE users MODIFY nickname VARCHAR(64) NOT NULL COMMENT '昵称'"
+            ))
+            conn.commit()
+            print("[OK] users 表已添加 nickname 字段")
+
+        result = conn.execute(text("""
+            SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'can_view_root_meetings'
+        """))
+        if result.scalar() == 0:
+            conn.execute(text(
+                "ALTER TABLE users ADD COLUMN can_view_root_meetings TINYINT(1) NOT NULL "
+                "DEFAULT 0 COMMENT '管理员是否可查看超级管理员会议(限3天)'"
+            ))
+            conn.commit()
+            print("[OK] users 表已添加 can_view_root_meetings 字段")
 
 
 def init_database(database_url: str):
@@ -106,19 +233,20 @@ def init_database(database_url: str):
             if not result.fetchone():
                 # 数据库不存在，创建它
                 conn.execute(text(f"CREATE DATABASE `{db_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"))
-                print(f"✓ 数据库 '{db_name}' 创建成功")
+                print(f"[OK] 数据库 '{db_name}' 创建成功")
             else:
-                print(f"✓ 数据库 '{db_name}' 已存在")
+                print(f"[OK] 数据库 '{db_name}' 已存在")
         temp_engine.dispose()
     except Exception as e:
-        print(f"⚠ 自动创建数据库失败: {str(e)}")
+        print(f"[WARN] 自动创建数据库失败: {str(e)}")
         print(f"请手动执行: mysql -u root -p -e \"CREATE DATABASE {db_name} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\"")
         raise
     
     # 现在使用完整的数据库URL创建引擎并创建表
     engine = create_engine(database_url, echo=False, pool_pre_ping=True)
     Base.metadata.create_all(engine)
-    print(f"✓ 数据库表结构创建成功")
+    migrate_schema(engine)
+    print("[OK] 数据库表结构创建成功")
     return engine
 
 

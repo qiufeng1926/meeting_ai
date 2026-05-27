@@ -62,6 +62,10 @@ db_charset = _env("DB_CHARSET", "utf8mb4")
 # 构建数据库连接URL
 database_url = f"mysql+pymysql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}?charset={db_charset}"
 
+# JWT 认证配置
+jwt_secret = _env("JWT_SECRET", "meeting-ai-jwt-secret-change-in-production")
+jwt_expire_hours = int(_env("JWT_EXPIRE_HOURS", "72") or "72")
+
 # 通义听悟实时转写（CreateTask + MeetingJoinUrl WebSocket）
 tingwu_access_key_id = _env("ALIBABA_CLOUD_ACCESS_KEY_ID", "")
 tingwu_access_key_secret = _env("ALIBABA_CLOUD_ACCESS_KEY_SECRET", "")

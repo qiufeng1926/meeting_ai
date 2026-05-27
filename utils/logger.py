@@ -106,6 +106,9 @@ class TimestampSizeRotatingHandler(logging.Handler):
         self._open_new_file()
         self._purge_old_files()
 
+    def _active_filepath(self) -> Path:
+        return self.log_dir / f"{self.service_name}.log"
+
     def _new_filepath(self) -> Path:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         return self.log_dir / f"{self.service_name}_{ts}.txt"
@@ -114,13 +117,18 @@ class TimestampSizeRotatingHandler(logging.Handler):
         if self.stream:
             self.stream.close()
             self.stream = None
-        self.base_path = self._new_filepath()
+        active = self._active_filepath()
+        if active.exists() and active.stat().st_size >= self.max_bytes:
+            active.rename(self._new_filepath())
+        self.base_path = active
         self.stream = open(self.base_path, "a", encoding="utf-8")
 
     def _purge_old_files(self) -> None:
         cutoff = datetime.now() - timedelta(days=self.retention_days)
-        pattern = f"{self.service_name}_*.txt"
-        for path in self.log_dir.glob(pattern):
+        active_name = self._active_filepath().name
+        for path in self.log_dir.glob(f"{self.service_name}_*.txt"):
+            if path.name == active_name:
+                continue
             try:
                 if datetime.fromtimestamp(path.stat().st_mtime) < cutoff:
                     path.unlink(missing_ok=True)
@@ -138,7 +146,11 @@ class TimestampSizeRotatingHandler(logging.Handler):
                 self.stream.write(msg + self.terminator)
                 self.stream.flush()
                 if self.base_path.stat().st_size >= self.max_bytes:
-                    self._open_new_file()
+                    archived = self._new_filepath()
+                    self.stream.close()
+                    self.base_path.rename(archived)
+                    self.stream = open(self._active_filepath(), "a", encoding="utf-8")
+                    self.base_path = self._active_filepath()
                     self._purge_old_files()
             finally:
                 self.release()

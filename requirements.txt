@@ -127,5 +127,6 @@ websockets==16.0
 yarg==0.1.9
 zai-sdk==0.2.2
 zhipuai==2.1.5.20250825
+PyJWT==2.10.1
 SQLAlchemy==2.0.36
 PyMySQL==1.1.0
