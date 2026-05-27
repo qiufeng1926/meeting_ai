@@ -85,7 +85,7 @@ class JsonLineFormatter(logging.Formatter):
 
 
 class TimestampSizeRotatingHandler(logging.Handler):
-    """按体积轮转：超过阈值后关闭当前文件并以新时间戳创建 .txt。"""
+    """按体积轮转：超过阈值后关闭当前文件并以新时间戳创建 .log。"""
 
     def __init__(
         self,
@@ -108,12 +108,12 @@ class TimestampSizeRotatingHandler(logging.Handler):
 
     def _new_filepath(self) -> Path:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        return self.log_dir / f"{self.service_name}_{ts}.txt"
+        return self.log_dir / f"{self.service_name}_{ts}.log"
 
     def _find_reusable_file(self) -> Path | None:
         """uvicorn --reload 重启时复用刚创建的日志，避免一次启动多个文件"""
         candidates = sorted(
-            self.log_dir.glob(f"{self.service_name}_*.txt"),
+            self.log_dir.glob(f"{self.service_name}_*.log"),
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )
@@ -137,7 +137,7 @@ class TimestampSizeRotatingHandler(logging.Handler):
     def _purge_old_files(self) -> None:
         cutoff = datetime.now() - timedelta(days=self.retention_days)
         current = self.base_path.name if self.base_path else None
-        for pattern in (f"{self.service_name}_*.txt", f"{self.service_name}.log"):
+        for pattern in (f"{self.service_name}_*.log", f"{self.service_name}.log"):
             for path in self.log_dir.glob(pattern):
                 if current and path.name == current:
                     continue

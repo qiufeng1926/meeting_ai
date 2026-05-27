@@ -316,6 +316,35 @@
             line-height: 1.8;
             white-space: pre-wrap;
         }
+
+        .summary-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            gap: 12px;
+        }
+
+        .btn-export {
+            padding: 8px 16px;
+            background: #4caf50;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            white-space: nowrap;
+            font-weight: bold;
+        }
+
+        .btn-export:hover {
+            background: #43a047;
+        }
+
+        .btn-export:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
         
         .info-box {
             margin-top: 20px;
@@ -613,7 +642,10 @@
             </div>
                     
             <div id="realtimeSummary" class="summary-container" style="display: none;">
-                <div class="summary-title">📝 AI 智能速览</div>
+                <div class="summary-header">
+                    <div class="summary-title" style="margin-bottom:0;">📝 AI 智能速览</div>
+                    <button class="btn-export" onclick="exportSummary('realtime')">📥 导出 Word</button>
+                </div>
                 <div id="realtimeSummaryText" class="summary-content"></div>
             </div>
                     
@@ -666,7 +698,10 @@
             </div>
             
             <div id="summaryResult" class="summary-container" style="display: none;">
-                <div class="summary-title">📝 AI 智能速览</div>
+                <div class="summary-header">
+                    <div class="summary-title" style="margin-bottom:0;">📝 AI 智能速览</div>
+                    <button class="btn-export" onclick="exportSummary('batch')">📥 导出 Word</button>
+                </div>
                 <div id="summaryText" class="summary-content"></div>
             </div>
             
@@ -1027,6 +1062,69 @@
             }
         }
 
+        async function exportSummaryDocx({ fileId, content, title }) {
+            try {
+                let response;
+                if (fileId) {
+                    response = await authFetch(`/api/meetings/${fileId}/export/summary`);
+                } else if (content) {
+                    response = await authFetch('/api/export/summary', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ content, title: title || 'AI 智能速览' }),
+                    });
+                } else {
+                    alert('无可导出的总结');
+                    return;
+                }
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    alert(err.detail || '导出失败');
+                    return;
+                }
+                const blob = await response.blob();
+                const disposition = response.headers.get('Content-Disposition') || '';
+                let filename = 'AI智能速览.docx';
+                const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+                const plainMatch = disposition.match(/filename="([^"]+)"/i);
+                if (utf8Match) filename = decodeURIComponent(utf8Match[1]);
+                else if (plainMatch) filename = plainMatch[1];
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+            } catch (e) {
+                alert('导出失败: ' + e.message);
+            }
+        }
+
+        function exportSummary(source) {
+            if (source === 'realtime') {
+                const content = document.getElementById('realtimeSummaryText').textContent.trim();
+                const meetingName = document.getElementById('meetingNameInput').value.trim();
+                exportSummaryDocx({
+                    fileId: lastRealtimeFileId,
+                    content: lastRealtimeFileId ? null : content,
+                    title: meetingName || 'AI 智能速览',
+                });
+            } else if (source === 'batch') {
+                const content = document.getElementById('summaryText').textContent.trim();
+                exportSummaryDocx({
+                    fileId: lastBatchFileId,
+                    content: lastBatchFileId ? null : content,
+                    title: lastBatchSummaryTitle,
+                });
+            }
+        }
+
+        function exportHistorySummary(fileId, title) {
+            exportSummaryDocx({ fileId, title: title || 'AI 智能速览' });
+        }
+
         // ========== 原有功能 ==========
         let ws = null;
         let mediaRecorder = null;
@@ -1037,6 +1135,9 @@
         let pollAbort = false;
         let pollFallbackTimer = null;
         let selectedFile = null;
+        let lastRealtimeFileId = null;
+        let lastBatchFileId = null;
+        let lastBatchSummaryTitle = 'AI 智能速览';
         
         const statusEl = document.getElementById('status');
         const startBtn = document.getElementById('startBtn');
@@ -1147,6 +1248,9 @@
                 const summaryTextEl = document.getElementById('realtimeSummaryText');
                 summaryTextEl.textContent = data.summary;
                 summaryEl.style.display = 'block';
+            }
+            if (data.file_id) {
+                lastRealtimeFileId = data.file_id;
             }
 
             startBtn.disabled = false;
@@ -1283,6 +1387,7 @@
             } else if (data.type === 'transcribe_complete') {
                 if (data.file_id) {
                     pendingFileId = data.file_id;
+                    lastRealtimeFileId = data.file_id;
                 }
                 if (data.total_text) {
                     renderTotalText(data.total_text);
@@ -1589,6 +1694,8 @@
                 progressFill.style.width = '100%';
                 
                 if (result.success) {
+                    lastBatchFileId = result.file_id || null;
+                    lastBatchSummaryTitle = document.getElementById('batchMeetingNameInput').value.trim() || 'AI 智能速览';
                     // 显示转写文本
                     transcriptText.textContent = result.transcript;
                     transcriptResult.style.display = 'block';
@@ -1715,7 +1822,10 @@
                     if (data.summary) {
                         html += `
                             <div style="margin-bottom: 30px;">
-                                <h3 style="color: #f57c00; margin-bottom: 15px;">📊 AI 智能速览</h3>
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                                    <h3 style="color: #f57c00; margin:0;">📊 AI 智能速览</h3>
+                                    <button class="btn-export" onclick="exportHistorySummary('${fileId}')">📥 导出 Word</button>
+                                </div>
                                 <div style="background: #fff9e6; padding: 20px; border-radius: 10px; line-height: 1.8; white-space: pre-wrap; border-left: 4px solid #ffa726;">${data.summary}</div>
                             </div>
                         `;

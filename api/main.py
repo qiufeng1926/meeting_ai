@@ -17,6 +17,7 @@ logger = setup_logging(
 from api.routes.meeting import router as meeting_router
 from api.routes.websocket import router as websocket_router
 from api.routes.auth import router as auth_router
+from api.routes.export import router as export_router
 
 app = FastAPI(
     title="Meeting AI",
@@ -39,6 +40,12 @@ app.add_middleware(
 logger.info("CORS 跨域已开启")
 
 # 注册路由
+app.include_router(
+    export_router,
+    prefix="/api",
+    tags=["文件导出"]
+)
+
 app.include_router(
     auth_router,
     prefix="/api",
