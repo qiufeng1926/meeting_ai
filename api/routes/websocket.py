@@ -126,15 +126,26 @@ async def websocket_transcribe(websocket: WebSocket):
     }
     tingwu_start_lock = asyncio.Lock()
 
-    async def on_tingwu_result(display_text: str, total_text: str, is_sentence_end: bool):
+    async def on_tingwu_result(
+        display_text: str,
+        total_text: str,
+        is_sentence_end: bool,
+        speaker_id: str | None = None,
+        speaker_label: str | None = None,
+    ):
         if is_sentence_end:
             session_info["total_text"] = total_text
-        await manager.send_json(connection_id, {
+        payload = {
             "type": "result",
             "text": display_text,
             "total_text": total_text if is_sentence_end else session_info["total_text"],
             "timestamp": datetime.now().isoformat(),
-        })
+        }
+        if speaker_id:
+            payload["speaker_id"] = speaker_id
+        if speaker_label:
+            payload["speaker_label"] = speaker_label
+        await manager.send_json(connection_id, payload)
 
     async def on_tingwu_error(error_message: str):
         session_info["tingwu_failed"] = True

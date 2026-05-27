@@ -48,6 +48,10 @@ from config.config import (
 
     tingwu_transcription_output_level,
 
+    tingwu_diarization_enabled,
+
+    tingwu_diarization_speaker_count,
+
 )
 
 from utils.logger import get_logger
@@ -66,7 +70,8 @@ AUDIO_CHUNK_BYTES = 3200
 
 
 
-OnResultCallback = Callable[[str, str, bool], Awaitable[None]]
+OnResultCallback = Callable[[str, str, bool, Optional[str], Optional[str]], Awaitable[None]]
+# (展示文本, 累计全文, 是否句末, speaker_id, 说话人展示名)
 
 OnErrorCallback = Callable[[str], Awaitable[None]]
 
@@ -134,15 +139,24 @@ def _build_create_task_body(task_key: str) -> dict:
 
         "Parameters": {
 
-            "Transcription": {
-
-                "OutputLevel": tingwu_transcription_output_level,
-
-            },
+            "Transcription": _build_transcription_params(),
 
         },
 
     }
+
+
+def _build_transcription_params() -> dict:
+    transcription: dict = {
+        "OutputLevel": tingwu_transcription_output_level,
+    }
+    if tingwu_diarization_enabled:
+        transcription["DiarizationEnabled"] = True
+        if tingwu_diarization_speaker_count is not None:
+            transcription["Diarization"] = {
+                "SpeakerCount": tingwu_diarization_speaker_count,
+            }
+    return transcription
 
 
 
@@ -384,6 +398,8 @@ class TingwuStreamingSession:
 
         self.last_error: Optional[str] = None
 
+        self._speaker_labels: dict[str, str] = {}
+
 
 
     @property
@@ -399,6 +415,23 @@ class TingwuStreamingSession:
     def is_ready(self) -> bool:
 
         return self._started_event.is_set() and not self._closed and not self._task_failed
+
+    def resolve_speaker_label(self, speaker_id: Optional[str]) -> Optional[str]:
+        """将听悟 speaker_id 映射为「说话人1」等展示名。"""
+        if not speaker_id or not tingwu_diarization_enabled:
+            return None
+        sid = str(speaker_id).strip()
+        if not sid:
+            return None
+        if sid not in self._speaker_labels:
+            self._speaker_labels[sid] = f"说话人{len(self._speaker_labels) + 1}"
+        return self._speaker_labels[sid]
+
+    def _format_with_speaker(self, text: str, speaker_id: Optional[str]) -> str:
+        label = self.resolve_speaker_label(speaker_id)
+        if label:
+            return f"[{label}] {text}"
+        return text
 
 
 
@@ -418,7 +451,13 @@ class TingwuStreamingSession:
 
             "听悟实时任务已创建",
 
-            extra={"output_params": {"task_id": self.task_id}},
+            extra={
+                "output_params": {
+                    "task_id": self.task_id,
+                    "diarization_enabled": tingwu_diarization_enabled,
+                    "speaker_count": tingwu_diarization_speaker_count,
+                }
+            },
 
         )
 
@@ -578,9 +617,19 @@ class TingwuStreamingSession:
 
             partial = str(payload.get("result") or "").strip()
 
+            speaker_id = payload.get("speaker_id")
+
             if partial and self.on_result:
 
-                await self.on_result(partial, self._completed_text, False)
+                display = self._format_with_speaker(partial, speaker_id)
+
+                await self.on_result(
+                    display,
+                    self._completed_text,
+                    False,
+                    speaker_id,
+                    self.resolve_speaker_label(speaker_id),
+                )
 
             return
 
@@ -590,13 +639,27 @@ class TingwuStreamingSession:
 
             sentence = _extract_sentence_text(payload)
 
+            speaker_id = payload.get("speaker_id")
+
             if sentence:
 
-                self._completed_text += sentence
+                line = self._format_with_speaker(sentence, speaker_id)
+
+                if self._completed_text and not self._completed_text.endswith("\n"):
+
+                    self._completed_text += "\n"
+
+                self._completed_text += line + "\n"
 
                 if self.on_result:
 
-                    await self.on_result(sentence, self._completed_text, True)
+                    await self.on_result(
+                        line,
+                        self._completed_text,
+                        True,
+                        speaker_id,
+                        self.resolve_speaker_label(speaker_id),
+                    )
 
             return
 

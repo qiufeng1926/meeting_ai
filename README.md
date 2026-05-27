@@ -68,6 +68,8 @@ ALIBABA_CLOUD_ACCESS_KEY_SECRET=your_access_key_secret
 TINGWU_APP_KEY=your_tingwu_appkey
 TINGWU_SOURCE_LANGUAGE=cn
 TINGWU_TRANSCRIPTION_OUTPUT_LEVEL=2
+TINGWU_DIARIZATION_ENABLED=true
+TINGWU_DIARIZATION_SPEAKER_COUNT=0
 
 # ASR 配置（批量上传）
 ASR_MODEL_NAME=paraformer-zh
@@ -349,6 +351,8 @@ meeting_ai/
 | `TINGWU_APP_KEY` | 听悟控制台 AppKey | 必填 |
 | `TINGWU_SOURCE_LANGUAGE` | 源语言（cn/en/yue/ja/ko 等） | `cn` |
 | `TINGWU_TRANSCRIPTION_OUTPUT_LEVEL` | 1=仅完整句，2=含中间结果 | `2` |
+| `TINGWU_DIARIZATION_ENABLED` | 是否开启说话人分离 | `true` |
+| `TINGWU_DIARIZATION_SPEAKER_COUNT` | 0=自动人数，2=按两人分离 | `0` |
 | `ASR_MODEL_NAME` | 批量 ASR 模型名称 | `paraformer-zh` |
 | `ASR_DEVICE` | 批量 ASR 运行设备 | `cpu` |
 | `FFMPEG_PATH` | FFmpeg 路径 | 需配置 |

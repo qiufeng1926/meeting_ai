@@ -659,9 +659,13 @@
             if (data.type === 'result') {
                 if (data.text) {
                     currentTextEl.textContent = data.text;
+                    if (data.speaker_label) {
+                        currentTextEl.dataset.speaker = data.speaker_label;
+                    }
                 }
                 if (data.total_text) {
                     totalTextEl.textContent = data.total_text;
+                    totalTextEl.style.whiteSpace = 'pre-wrap';
                 }
             } else if (data.type === 'transcribe_complete') {
                 if (data.file_id) {

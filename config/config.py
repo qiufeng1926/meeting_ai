@@ -15,6 +15,11 @@ def _env(key: str, default: str | None = None) -> str | None:
     return v
 
 
+def _env_bool(key: str, default: str = "false") -> bool:
+    v = _env(key, default) or default
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
 def _path_from_env(key: str, default_relative: str) -> str:
     raw = _env(key)
     if raw is None:
@@ -68,4 +73,10 @@ tingwu_audio_format = _env("TINGWU_AUDIO_FORMAT", "pcm")
 tingwu_sample_rate = int(_env("TINGWU_SAMPLE_RATE", "16000") or "16000")
 tingwu_transcription_output_level = int(
     _env("TINGWU_TRANSCRIPTION_OUTPUT_LEVEL", "2") or "2"
+)
+# 说话人分离（CreateTask Parameters.Transcription.DiarizationEnabled）
+tingwu_diarization_enabled = _env_bool("TINGWU_DIARIZATION_ENABLED", "true")
+_speaker_count_raw = _env("TINGWU_DIARIZATION_SPEAKER_COUNT", "0")
+tingwu_diarization_speaker_count: int | None = (
+    int(_speaker_count_raw) if _speaker_count_raw is not None and _speaker_count_raw != "" else None
 )
