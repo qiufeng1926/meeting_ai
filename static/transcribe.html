@@ -186,6 +186,43 @@
             white-space: pre-wrap;
             word-wrap: break-word;
         }
+
+        .speaker-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            font-size: 12px;
+            padding: 2px 10px;
+            border-radius: 12px;
+            margin-right: 8px;
+            font-weight: bold;
+            vertical-align: middle;
+            flex-shrink: 0;
+        }
+
+        .speaker-line {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            margin-bottom: 10px;
+            padding: 8px 10px;
+            background: white;
+            border-radius: 6px;
+            border-left: 3px solid #667eea;
+        }
+
+        .speaker-line .line-text {
+            flex: 1;
+            line-height: 1.6;
+        }
+
+        .current-text .speaker-badge {
+            margin-bottom: 6px;
+        }
+
+        .current-text .current-fragment {
+            display: inline;
+        }
         
         /* 批量上传样式 */
         .upload-area {
@@ -1101,7 +1138,7 @@
             }
 
             if (data.total_text) {
-                totalTextEl.textContent = data.total_text;
+                renderTotalText(data.total_text);
             }
             currentTextEl.textContent = '会话已结束';
 
@@ -1181,27 +1218,74 @@
             });
         }
         
+        // 说话人展示
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function stripSpeakerPrefix(text) {
+            return (text || '').replace(/^\[说话人\d+\]\s*/, '');
+        }
+
+        function renderTranscriptHtml(text) {
+            if (!text) return '';
+            const lines = text.split('\n');
+            let html = '';
+            for (const line of lines) {
+                const m = line.match(/^\[(说话人\d+)\]\s*(.*)$/);
+                if (m) {
+                    html += `<div class="speaker-line"><span class="speaker-badge">${escapeHtml(m[1])}</span><span class="line-text">${escapeHtml(m[2])}</span></div>`;
+                } else if (line.trim()) {
+                    html += `<div class="speaker-line"><span class="line-text">${escapeHtml(line)}</span></div>`;
+                }
+            }
+            return html;
+        }
+
+        function renderCurrentText(data) {
+            const label = data.speaker_label;
+            const body = stripSpeakerPrefix(data.text || '');
+            if (label) {
+                currentTextEl.innerHTML =
+                    `<span class="speaker-badge">${escapeHtml(label)}</span>` +
+                    `<span class="current-fragment">${escapeHtml(body)}</span>`;
+            } else if (body) {
+                currentTextEl.textContent = body;
+            }
+        }
+
+        function renderTotalText(text) {
+            if (!text) {
+                totalTextEl.textContent = '';
+                return;
+            }
+            if (/\[说话人\d+\]/.test(text)) {
+                totalTextEl.innerHTML = renderTranscriptHtml(text);
+            } else {
+                totalTextEl.textContent = text;
+            }
+            totalTextEl.style.whiteSpace = 'pre-wrap';
+        }
+
         // 处理 WebSocket 消息
         function handleWebSocketMessage(data) {
             console.log('收到消息:', data);
             
             if (data.type === 'result') {
                 if (data.text) {
-                    currentTextEl.textContent = data.text;
-                    if (data.speaker_label) {
-                        currentTextEl.dataset.speaker = data.speaker_label;
-                    }
+                    renderCurrentText(data);
                 }
                 if (data.total_text) {
-                    totalTextEl.textContent = data.total_text;
-                    totalTextEl.style.whiteSpace = 'pre-wrap';
+                    renderTotalText(data.total_text);
                 }
             } else if (data.type === 'transcribe_complete') {
                 if (data.file_id) {
                     pendingFileId = data.file_id;
                 }
                 if (data.total_text) {
-                    totalTextEl.textContent = data.total_text;
+                    renderTotalText(data.total_text);
                 }
                 currentTextEl.textContent = '转写完成，正在生成 AI 智能速览...';
             } else if (data.type === 'generating_summary') {
@@ -1624,7 +1708,7 @@
                         
                         <div style="margin-bottom: 30px;">
                             <h3 style="color: #667eea; margin-bottom: 15px;">📝 转写文本</h3>
-                            <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; line-height: 1.8; white-space: pre-wrap;">${data.transcript}</div>
+                            <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; line-height: 1.8;">${renderTranscriptHtml(data.transcript) || escapeHtml(data.transcript || '')}</div>
                         </div>
                     `;
                     

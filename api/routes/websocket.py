@@ -156,7 +156,7 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
             "total_text": total_text if is_sentence_end else session_info["total_text"],
             "timestamp": datetime.now().isoformat(),
         }
-        if speaker_id:
+        if speaker_id is not None:
             payload["speaker_id"] = speaker_id
         if speaker_label:
             payload["speaker_label"] = speaker_label

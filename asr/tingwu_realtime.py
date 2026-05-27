@@ -152,10 +152,12 @@ def _build_transcription_params() -> dict:
     }
     if tingwu_diarization_enabled:
         transcription["DiarizationEnabled"] = True
-        if tingwu_diarization_speaker_count is not None:
-            transcription["Diarization"] = {
-                "SpeakerCount": tingwu_diarization_speaker_count,
-            }
+        speaker_count = (
+            tingwu_diarization_speaker_count
+            if tingwu_diarization_speaker_count is not None
+            else 0
+        )
+        transcription["Diarization"] = {"SpeakerCount": speaker_count}
     return transcription
 
 
@@ -315,6 +317,40 @@ def _extract_sentence_text(payload: dict) -> str:
     return text
 
 
+def _extract_speaker_id(payload: dict) -> Optional[str]:
+    """从听悟 payload 提取说话人 ID（兼容 payload / words 多级字段）"""
+    for key in ("speaker_id", "speakerId", "SpeakerId"):
+        if key in payload and payload[key] is not None:
+            sid = str(payload[key]).strip()
+            if sid != "":
+                return sid
+
+    words = payload.get("words") or []
+    if isinstance(words, list):
+        for word in words:
+            if not isinstance(word, dict):
+                continue
+            for key in ("speaker_id", "speakerId", "SpeakerId"):
+                if key in word and word[key] is not None:
+                    sid = str(word[key]).strip()
+                    if sid != "":
+                        return sid
+
+    stash = payload.get("stash_result") or {}
+    if isinstance(stash, dict):
+        stash_words = stash.get("words") or []
+        if isinstance(stash_words, list):
+            for word in stash_words:
+                if not isinstance(word, dict):
+                    continue
+                for key in ("speaker_id", "speakerId", "SpeakerId"):
+                    if key in word and word[key] is not None:
+                        sid = str(word[key]).strip()
+                        if sid != "":
+                            return sid
+    return None
+
+
 
 
 
@@ -418,11 +454,11 @@ class TingwuStreamingSession:
 
     def resolve_speaker_label(self, speaker_id: Optional[str]) -> Optional[str]:
         """将听悟 speaker_id 映射为「说话人1」等展示名。"""
-        if not speaker_id or not tingwu_diarization_enabled:
+        if not tingwu_diarization_enabled:
+            return None
+        if speaker_id is None or str(speaker_id).strip() == "":
             return None
         sid = str(speaker_id).strip()
-        if not sid:
-            return None
         if sid not in self._speaker_labels:
             self._speaker_labels[sid] = f"说话人{len(self._speaker_labels) + 1}"
         return self._speaker_labels[sid]
@@ -617,7 +653,7 @@ class TingwuStreamingSession:
 
             partial = str(payload.get("result") or "").strip()
 
-            speaker_id = payload.get("speaker_id")
+            speaker_id = _extract_speaker_id(payload)
 
             if partial and self.on_result:
 
@@ -639,7 +675,7 @@ class TingwuStreamingSession:
 
             sentence = _extract_sentence_text(payload)
 
-            speaker_id = payload.get("speaker_id")
+            speaker_id = _extract_speaker_id(payload)
 
             if sentence:
 
