@@ -216,7 +216,8 @@ class FunASREngine:
 
         self._streaming_model = None
         self._vad_model = None
-        self.executor = ThreadPoolExecutor(max_workers=4)
+        # 流式会话（若启用本地 FunASR 流式）与批量转写分离，批量走 asr_batch_executor
+        self._stream_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='asr-stream')
 
     def _get_streaming_model(self):
         if self._streaming_model is None:
@@ -264,20 +265,20 @@ class FunASREngine:
         return text.replace(" ", "")
 
     async def transcribe_async(self, audio_path: str) -> str:
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(self.executor, self.transcribe, audio_path)
+        from utils.executors import run_asr_batch
+        return await run_asr_batch(self.transcribe, audio_path)
 
     async def feed_stream_async(
         self, session: StreamingTranscriber, audio_bytes: bytes, sample_rate: int
     ) -> str:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            self.executor, session.feed, audio_bytes, sample_rate
+            self._stream_executor, session.feed, audio_bytes, sample_rate
         )
 
     async def finalize_stream_async(self, session: StreamingTranscriber) -> str:
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(self.executor, session.finalize)
+        return await loop.run_in_executor(self._stream_executor, session.finalize)
 
 
 if __name__ == "__main__":

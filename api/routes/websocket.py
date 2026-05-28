@@ -33,17 +33,17 @@ from db.models import User
 from db.session import SessionFactory
 from utils.logger import get_logger
 from asr.tingwu_realtime import TingwuRealtimeEngine, TingwuTaskError
-from llm.glm_chat import GLMClient
+from llm.client_holder import get_glm_client
 from llm.summary_service import generate_dual_summaries, visual_dict_from_result
 from config.config import output_dir
-from db.session import save_meeting_to_db
+from db.session import save_meeting_to_db_async
+from utils.executors import run_io
 
 router = APIRouter()
 logger = get_logger("websocket_route")
 
 # 实时转写使用通义听悟；批量上传仍使用 FunASR（见 meeting.py）
 tingwu_engine = TingwuRealtimeEngine()
-glm_client = GLMClient()
 
 
 class ConnectionManager:
@@ -276,7 +276,7 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
                         output_dir, "transcripts",
                         transcript_filename
                     )
-                    await _save_text_async(transcript_path, session_info["total_text"])
+                    await run_io(Path(transcript_path).write_text, session_info["total_text"], encoding='utf-8')
                     logger.info(f"实时转写文本已保存", extra={'request_id': connection_id, 'output_params': {'transcript_file': transcript_path, 'text_length': len(session_info["total_text"])}})
                     
                     end_result_base = {
@@ -305,7 +305,7 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
                         dual = await _run_with_keepalive(
                             connection_id,
                             generate_dual_summaries(
-                                glm_client,
+                                get_glm_client(),
                                 session_info["total_text"],
                                 meeting_name or None,
                             ),
@@ -320,10 +320,10 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
                         summary_path = os.path.join(
                             output_dir, "summaries", summary_filename
                         )
-                        await _save_text_async(summary_path, summary)
+                        await run_io(Path(summary_path).write_text, summary, encoding='utf-8')
                         visual_path = summary_path.replace('.md', '_visual.json')
                         if dual.visual_json:
-                            await _save_text_async(visual_path, dual.visual_json)
+                            await run_io(Path(visual_path).write_text, dual.visual_json, encoding='utf-8')
 
                         total_duration_ms = (time.time() - start_time) * 1000
                         logger.info(
@@ -358,7 +358,7 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
                                 'total_duration_ms': round(total_duration_ms, 2),
                                 'status': 'completed'
                             }
-                            save_meeting_to_db(meeting_data)
+                            await save_meeting_to_db_async(meeting_data)
                             logger.info(f"实时会议数据已保存到数据库", extra={'request_id': connection_id})
                         except Exception as db_error:
                             logger.error(f"保存实时会议数据到数据库失败: {str(db_error)}", exc_info=True, extra={'request_id': connection_id})
@@ -416,7 +416,7 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
                                 'status': 'failed',
                                 'error_message': f"生成总结失败: {str(e)}"
                             }
-                            save_meeting_to_db(meeting_data)
+                            await save_meeting_to_db_async(meeting_data)
                             logger.info(f"失败的实时会议数据已保存到数据库", extra={'request_id': connection_id})
                         except Exception as db_error:
                             logger.error(f"保存失败的实时会议数据到数据库失败: {str(db_error)}", exc_info=True, extra={'request_id': connection_id})
@@ -660,7 +660,3 @@ async def get_meeting(file_id: str, current_user: User = Depends(get_current_use
         }
 
 
-async def _save_text_async(file_path: str, text: str):
-    """异步保存文本文件"""
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, lambda: Path(file_path).write_text(text, encoding='utf-8'))

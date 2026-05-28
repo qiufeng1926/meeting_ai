@@ -1,8 +1,8 @@
 import os
 import asyncio
 from zhipuai import ZhipuAI
-from concurrent.futures import ThreadPoolExecutor
 from utils.logger import get_logger
+from utils.executors import io_executor
 
 logger = get_logger("glm_client")
 
@@ -41,9 +41,7 @@ class GLMClient:
         )
 
         self.model = model
-        
-        # 创建线程池用于异步执行
-        self.executor = ThreadPoolExecutor(max_workers=4)
+        self.executor = io_executor
 
     def chat(
         self,

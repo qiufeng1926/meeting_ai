@@ -28,6 +28,8 @@ from aliyunsdkcore.request import CommonRequest
 
 
 
+from utils.executors import run_io
+
 from config.config import (
 
     tingwu_access_key_id,
@@ -473,9 +475,7 @@ class TingwuStreamingSession:
 
     async def start(self) -> None:
 
-        loop = asyncio.get_event_loop()
-
-        task_info = await loop.run_in_executor(None, _create_realtime_task_sync)
+        task_info = await run_io(_create_realtime_task_sync)
 
         self.task_id = task_info["TaskId"]
 
@@ -823,11 +823,9 @@ class TingwuStreamingSession:
 
         if self.task_id:
 
-            loop = asyncio.get_event_loop()
-
             try:
 
-                await loop.run_in_executor(None, _stop_realtime_task_sync, self.task_id)
+                await run_io(_stop_realtime_task_sync, self.task_id)
 
             except Exception as e:
 

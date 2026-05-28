@@ -79,6 +79,12 @@ def get_db_session() -> Session:
         session.close()
 
 
+async def save_meeting_to_db_async(meeting_data: dict) -> None:
+    """在线程池中写入数据库，避免阻塞 WebSocket / 其他 API 事件循环"""
+    from utils.executors import run_io
+    await run_io(save_meeting_to_db, meeting_data)
+
+
 def save_meeting_to_db(meeting_data: dict) -> Meeting:
     """
     保存会议记录到数据库

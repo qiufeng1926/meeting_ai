@@ -18,17 +18,17 @@ from db.models import User
 
 from config.config import upload_dir, output_dir
 from asr.engine import FunASREngine
-from llm.glm_chat import GLMClient
+from llm.client_holder import get_glm_client
 from llm.summary_service import generate_dual_summaries, visual_dict_from_result
 from utils.logger import get_logger
-from db.session import save_meeting_to_db
+from utils.executors import _get_batch_sem, run_io
+from db.session import save_meeting_to_db_async
 
 router = APIRouter()
 logger = get_logger("meeting_route")
 
 # 初始化
 asr_engine = FunASREngine()
-glm = GLMClient()
 
 # 创建目录结构
 os.makedirs(upload_dir, exist_ok=True)
@@ -57,12 +57,30 @@ async def upload_meeting_audio(
     }
     
     logger.info(f"收到音频文件上传请求", extra={'request_id': request_id, 'input_params': input_params})
-    
+
+    async with _get_batch_sem():
+        return await _process_meeting_upload(
+            content=await file.read(),
+            filename=file.filename,
+            meeting_name=meeting_name,
+            request_id=request_id,
+            input_params=input_params,
+            start_time=start_time,
+            current_user=current_user,
+        )
+
+
+async def _process_meeting_upload(
+    content: bytes,
+    filename: str,
+    meeting_name: str | None,
+    request_id: str,
+    input_params: dict,
+    start_time: float,
+    current_user: User,
+):
     try:
-        # 读取文件内容
-        content = await file.read()
         input_params["file_size"] = len(content)
-        
         # 处理会议名称
         if meeting_name:
             safe_name = "".join(c for c in meeting_name if c.isalnum() or c in (' ', '-', '_')).strip()
@@ -75,11 +93,11 @@ async def upload_meeting_audio(
         # 生成文件名
         file_id = str(uuid.uuid4())
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        ext = file.filename.split(".")[-1]
+        ext = filename.split(".")[-1] if "." in filename else "wav"
 
         # 异步保存上传的音频文件
         save_path = os.path.join(upload_dir, f"{file_id}.{ext}")
-        await _save_file_async(save_path, content)
+        await run_io(Path(save_path).write_bytes, content)
         logger.info(f"音频文件已保存", extra={'request_id': request_id, 'output_params': {'save_path': save_path, 'file_size': len(content)}})
 
         # 异步 ASR 语音转文字
@@ -97,13 +115,13 @@ async def upload_meeting_audio(
 
         # 异步保存转写文本
         transcript_path = os.path.join(output_dir, "transcripts", f"{name_prefix}{file_id}_{timestamp}.txt")
-        await _save_text_async(transcript_path, transcript)
+        await run_io(Path(transcript_path).write_text, transcript, encoding='utf-8')
         logger.info(f"转写文本已保存", extra={'request_id': request_id, 'output_params': {'transcript_file': transcript_path}})
 
         # 并行生成 Markdown 速览 + 图文 JSON
         logger.info(f"开始生成会议纪要（双轨）...", extra={'request_id': request_id})
         llm_start = time.time()
-        dual = await generate_dual_summaries(glm, transcript, meeting_name)
+        dual = await generate_dual_summaries(get_glm_client(), transcript, meeting_name)
         llm_duration = (time.time() - llm_start) * 1000
 
         if dual.markdown_error or not dual.markdown:
@@ -121,10 +139,10 @@ async def upload_meeting_audio(
         })
 
         summary_path = os.path.join(output_dir, "summaries", f"{name_prefix}{file_id}_{timestamp}.md")
-        await _save_text_async(summary_path, summary)
+        await run_io(Path(summary_path).write_text, summary, encoding='utf-8')
         visual_path = os.path.join(output_dir, "summaries", f"{name_prefix}{file_id}_{timestamp}_visual.json")
         if dual.visual_json:
-            await _save_text_async(visual_path, dual.visual_json)
+            await run_io(Path(visual_path).write_text, dual.visual_json, encoding='utf-8')
         logger.info(f"会议纪要已保存", extra={
             'request_id': request_id,
             'output_params': {'summary_file': summary_path, 'visual_file': visual_path},
@@ -139,7 +157,7 @@ async def upload_meeting_audio(
                 'file_id': file_id,
                 'user_id': current_user.id,
                 'meeting_name': meeting_name,
-                'original_filename': file.filename,
+                'original_filename': filename,
                 'meeting_type': 'batch',
                 'audio_file_path': save_path,
                 'transcript_file_path': transcript_path,
@@ -155,7 +173,7 @@ async def upload_meeting_audio(
                 'total_duration_ms': round(total_duration_ms, 2),
                 'status': 'completed'
             }
-            save_meeting_to_db(meeting_data)
+            await save_meeting_to_db_async(meeting_data)
             logger.info(f"会议数据已保存到数据库", extra={'request_id': request_id})
         except Exception as db_error:
             logger.error(f"保存会议数据到数据库失败: {str(db_error)}", exc_info=True, extra={'request_id': request_id})
@@ -177,7 +195,7 @@ async def upload_meeting_audio(
         
         return {
             "success": True,
-            "filename": file.filename,
+            "filename": filename,
             "file_id": file_id,
             "transcript": transcript,
             "summary": summary,
@@ -201,13 +219,3 @@ async def upload_meeting_audio(
         }
 
 
-async def _save_file_async(file_path: str, content: bytes):
-    """异步保存文件"""
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, lambda: Path(file_path).write_bytes(content))
-
-
-async def _save_text_async(file_path: str, text: str):
-    """异步保存文本文件"""
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, lambda: Path(file_path).write_text(text, encoding='utf-8'))
