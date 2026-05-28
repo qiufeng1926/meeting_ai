@@ -34,6 +34,7 @@ from db.session import SessionFactory
 from utils.logger import get_logger
 from asr.tingwu_realtime import TingwuRealtimeEngine, TingwuTaskError
 from llm.glm_chat import GLMClient
+from llm.summary_service import generate_dual_summaries, visual_dict_from_result
 from config.config import output_dir
 from db.session import save_meeting_to_db
 
@@ -295,24 +296,34 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
                     })
                     await manager.send_json(connection_id, {
                         "type": "generating_summary",
-                        "message": "正在生成 AI 智能速览...",
+                        "message": "正在生成文字与图文速览...",
                         "file_id": file_id,
                     })
 
-                    # 异步生成 AI 总结（期间发送心跳保活）
+                    # 并行生成 Markdown + 图文速览（期间发送心跳保活）
                     try:
-                        summary = await _run_with_keepalive(
+                        dual = await _run_with_keepalive(
                             connection_id,
-                            glm_client.summary_meeting_async(
-                                session_info["total_text"]
+                            generate_dual_summaries(
+                                glm_client,
+                                session_info["total_text"],
+                                meeting_name or None,
                             ),
                             stage="summary",
                         )
+                        if dual.markdown_error or not dual.markdown:
+                            raise RuntimeError(dual.markdown_error or 'Markdown 速览生成失败')
+
+                        summary = dual.markdown
+                        summary_visual_dict = visual_dict_from_result(dual)
 
                         summary_path = os.path.join(
                             output_dir, "summaries", summary_filename
                         )
                         await _save_text_async(summary_path, summary)
+                        visual_path = summary_path.replace('.md', '_visual.json')
+                        if dual.visual_json:
+                            await _save_text_async(visual_path, dual.visual_json)
 
                         total_duration_ms = (time.time() - start_time) * 1000
                         logger.info(
@@ -340,6 +351,8 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
                                 'summary_file_path': summary_path,
                                 'transcript': session_info["total_text"],
                                 'summary': summary,
+                                'summary_visual': dual.visual_json,
+                                'summary_visual_status': dual.visual_status,
                                 'transcript_length': len(session_info["total_text"]),
                                 'summary_length': len(summary),
                                 'total_duration_ms': round(total_duration_ms, 2),
@@ -353,6 +366,9 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
                         end_result = {
                             "type": "session_end",
                             "summary": summary,
+                            "summary_visual": summary_visual_dict,
+                            "summary_visual_status": dual.visual_status,
+                            "summary_visual_error": dual.visual_error,
                             "summary_file": summary_path,
                             **end_result_base,
                         }
@@ -583,6 +599,32 @@ async def get_meeting(file_id: str, current_user: User = Depends(get_current_use
         if summary_file:
             with open(summary_file, 'r', encoding='utf-8') as f:
                 summary = f.read()
+
+        summary_visual = None
+        summary_visual_status = None
+        from db.session import get_meeting_by_file_id
+        import json as json_lib
+
+        meeting_record = get_meeting_by_file_id(file_id)
+        if meeting_record:
+            if not summary and meeting_record.summary:
+                summary = meeting_record.summary
+            summary_visual_status = meeting_record.summary_visual_status
+            if meeting_record.summary_visual:
+                try:
+                    summary_visual = json_lib.loads(meeting_record.summary_visual)
+                except json_lib.JSONDecodeError:
+                    summary_visual = None
+        if summary_visual is None and summary_file:
+            visual_file = summary_file.replace('.md', '_visual.json')
+            if os.path.exists(visual_file):
+                try:
+                    with open(visual_file, 'r', encoding='utf-8') as vf:
+                        summary_visual = json_lib.loads(vf.read())
+                        if not summary_visual_status:
+                            summary_visual_status = 'completed'
+                except json_lib.JSONDecodeError:
+                    pass
         
         duration_ms = (time.time() - start_time) * 1000
         output_params = {
@@ -590,6 +632,8 @@ async def get_meeting(file_id: str, current_user: User = Depends(get_current_use
             "file_id": file_id,
             "transcript_length": len(transcript),
             "has_summary": summary is not None,
+            "has_visual_summary": summary_visual is not None,
+            "summary_visual_status": summary_visual_status,
             "summary_length": len(summary) if summary else 0,
             "duration_ms": round(duration_ms, 2)
         }
@@ -600,6 +644,8 @@ async def get_meeting(file_id: str, current_user: User = Depends(get_current_use
             "file_id": file_id,
             "transcript": transcript,
             "summary": summary,
+            "summary_visual": summary_visual,
+            "summary_visual_status": summary_visual_status,
             "transcript_file": transcript_file,
             "summary_file": summary_file
         }

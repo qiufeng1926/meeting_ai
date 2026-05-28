@@ -9,7 +9,11 @@ logger = get_logger("glm_client")
 from config.config import glm_api_key, glm_model, glm_temperature
 from llm.prompt import (
     SYSTEM_PROMPT,
-    build_meeting_prompt
+    build_meeting_prompt,
+)
+from llm.prompt_visual import (
+    SYSTEM_PROMPT_VISUAL,
+    build_visual_prompt,
 )
 
 
@@ -38,7 +42,8 @@ class GLMClient:
     def chat(
         self,
         prompt: str,
-        temperature: float = glm_temperature
+        temperature: float = glm_temperature,
+        system_prompt: str = SYSTEM_PROMPT,
     ):
 
         response = self.client.chat.completions.create(
@@ -46,12 +51,12 @@ class GLMClient:
             messages=[
                 {
                     "role": "system",
-                    "content": SYSTEM_PROMPT
+                    "content": system_prompt,
                 },
                 {
                     "role": "user",
-                    "content": prompt
-                }
+                    "content": prompt,
+                },
             ],
             temperature=temperature,
             top_p=0.85,
@@ -62,17 +67,14 @@ class GLMClient:
     async def chat_async(
         self,
         prompt: str,
-        temperature: float = glm_temperature
+        temperature: float = glm_temperature,
+        system_prompt: str = SYSTEM_PROMPT,
     ):
-        """
-        异步聊天
-        """
+        """异步聊天"""
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
-            self.executor, 
-            self.chat, 
-            prompt, 
-            temperature
+            self.executor,
+            lambda: self.chat(prompt, temperature, system_prompt),
         )
 
     def summary_meeting(
@@ -95,6 +97,27 @@ class GLMClient:
         """
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(self.executor, self.summary_meeting, transcript)
+
+    def summary_visual(
+        self,
+        transcript: str,
+        meeting_name: str | None = None,
+    ):
+        prompt = build_visual_prompt(transcript, meeting_name)
+        return self.chat(prompt, system_prompt=SYSTEM_PROMPT_VISUAL)
+
+    async def summary_visual_async(
+        self,
+        transcript: str,
+        meeting_name: str | None = None,
+    ):
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            self.executor,
+            self.summary_visual,
+            transcript,
+            meeting_name,
+        )
 
 
 if __name__ == "__main__":

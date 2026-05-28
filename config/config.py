@@ -43,6 +43,9 @@ glm_api_key = _env("GLM_API_KEY", "")
 glm_model = _env("GLM_MODEL", "glm-4-flash")
 glm_temperature = float(_env("GLM_TEMPERATURE", "0.3") or "0.3")
 
+# 图文速览（与 Markdown 并行生成，每场必生成）
+visual_summary_retry_max = int(_env("VISUAL_SUMMARY_RETRY_MAX", "2") or "2")
+
 # 文件路径配置
 upload_dir = _path_from_env("UPLOAD_DIR", "upload")
 output_dir = _path_from_env("OUTPUT_DIR", "output")

@@ -325,6 +325,201 @@
             gap: 12px;
         }
 
+        .summary-view-tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+
+        .summary-view-tab {
+            padding: 8px 16px;
+            border: 2px solid #e0e0e0;
+            background: white;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+            color: #666;
+        }
+
+        .summary-view-tab.active {
+            border-color: #667eea;
+            color: #667eea;
+            font-weight: bold;
+            background: #f0f3ff;
+        }
+
+        .summary-view-tab:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .visual-summary-root {
+            background: #f5f6fa;
+            border-radius: 12px;
+            padding: 16px;
+        }
+
+        .visual-summary-title {
+            font-size: 22px;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        .visual-summary-subtitle {
+            color: #888;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .visual-section {
+            margin-bottom: 24px;
+        }
+
+        .visual-section-head {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+
+        .visual-section-num {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+
+        .visual-section-title {
+            font-size: 17px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .visual-cards {
+            display: grid;
+            gap: 12px;
+        }
+
+        .visual-cards.layout-grid-2 { grid-template-columns: repeat(2, 1fr); }
+        .visual-cards.layout-grid-3 { grid-template-columns: repeat(3, 1fr); }
+        .visual-cards.layout-grid-4 { grid-template-columns: repeat(4, 1fr); }
+        .visual-cards.layout-full { grid-template-columns: 1fr; }
+
+        @media (max-width: 900px) {
+            .visual-cards.layout-grid-3,
+            .visual-cards.layout-grid-4 { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        @media (max-width: 600px) {
+            .visual-cards.layout-grid-2,
+            .visual-cards.layout-grid-3,
+            .visual-cards.layout-grid-4 { grid-template-columns: 1fr; }
+        }
+
+        .visual-card {
+            background: white;
+            border-radius: 10px;
+            padding: 14px;
+            border: 1px solid #eee;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+        }
+
+        .visual-card-head {
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .visual-card-icon { font-size: 20px; line-height: 1; }
+
+        .visual-card-title {
+            font-weight: bold;
+            color: #333;
+            font-size: 15px;
+            flex: 1;
+        }
+
+        .visual-card-tag {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: #f0f0f0;
+            color: #666;
+            white-space: nowrap;
+        }
+
+        .visual-card-bullets {
+            margin: 0 0 10px 0;
+            padding-left: 18px;
+            color: #555;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .visual-card-highlight {
+            font-size: 12px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            line-height: 1.5;
+        }
+
+        .visual-footer-block {
+            background: white;
+            border-radius: 10px;
+            padding: 16px;
+            margin-top: 8px;
+            border: 1px solid #eee;
+        }
+
+        .visual-footer-block h4 {
+            margin: 0 0 10px 0;
+            color: #667eea;
+            font-size: 15px;
+        }
+
+        .visual-disclaimer {
+            font-size: 12px;
+            color: #999;
+            margin-top: 12px;
+            text-align: center;
+        }
+
+        .theme-green { --accent: #27ae60; --accent-bg: #e8f8ef; }
+        .theme-orange { --accent: #e67e22; --accent-bg: #fef5e7; }
+        .theme-blue { --accent: #3498db; --accent-bg: #ebf5fb; }
+        .theme-pink { --accent: #e91e63; --accent-bg: #fce4ec; }
+        .theme-teal { --accent: #16a085; --accent-bg: #e8f6f3; }
+        .theme-brown { --accent: #795548; --accent-bg: #efebe9; }
+        .theme-purple { --accent: #9b59b6; --accent-bg: #f4ecf7; }
+        .theme-red { --accent: #e74c3c; --accent-bg: #fdedec; }
+
+        .theme-green .visual-section-num,
+        .theme-green .visual-card-highlight { background: var(--accent-bg); color: var(--accent); }
+        .theme-green .visual-section-num { background: var(--accent); color: white; }
+        .theme-green .visual-card-highlight { background: var(--accent-bg); }
+
+        .theme-orange .visual-section-num { background: #e67e22; color: white; }
+        .theme-orange .visual-card-highlight { background: #fef5e7; color: #e67e22; }
+        .theme-blue .visual-section-num { background: #3498db; color: white; }
+        .theme-blue .visual-card-highlight { background: #ebf5fb; color: #3498db; }
+        .theme-pink .visual-section-num { background: #e91e63; color: white; }
+        .theme-pink .visual-card-highlight { background: #fce4ec; color: #e91e63; }
+        .theme-teal .visual-section-num { background: #16a085; color: white; }
+        .theme-teal .visual-card-highlight { background: #e8f6f3; color: #16a085; }
+        .theme-brown .visual-section-num { background: #795548; color: white; }
+        .theme-brown .visual-card-highlight { background: #efebe9; color: #795548; }
+        .theme-purple .visual-section-num { background: #9b59b6; color: white; }
+        .theme-purple .visual-card-highlight { background: #f4ecf7; color: #9b59b6; }
+        .theme-red .visual-section-num { background: #e74c3c; color: white; }
+        .theme-red .visual-card-highlight { background: #fdedec; color: #e74c3c; }
+
         .btn-export {
             padding: 8px 16px;
             background: #4caf50;
@@ -345,6 +540,28 @@
             opacity: 0.5;
             cursor: not-allowed;
         }
+
+        .summary-export-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .btn-export-visual {
+            padding: 8px 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            white-space: nowrap;
+            font-weight: bold;
+        }
+
+        .btn-export-visual:hover { background: #5568d3; }
+        .btn-export-visual:disabled { opacity: 0.5; cursor: not-allowed; }
         
         .info-box {
             margin-top: 20px;
@@ -677,6 +894,12 @@
 
         .btn-sm.btn-primary { background: #667eea; color: white; }
         .btn-sm.btn-primary:hover { background: #5568d3; }
+
+        .root-admin-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
     </style>
 </head>
 <body>
@@ -775,9 +998,18 @@
             <div id="realtimeSummary" class="summary-container" style="display: none;">
                 <div class="summary-header">
                     <div class="summary-title" style="margin-bottom:0;">📝 AI 智能速览</div>
-                    <button class="btn-export" onclick="exportSummary('realtime')">📥 导出 Word</button>
+                    <div class="summary-export-actions">
+                        <button class="btn-export" onclick="exportSummary('realtime')">📥 导出 Word</button>
+                        <button type="button" id="realtimeExportVisualBtn" class="btn-export-visual" onclick="exportVisual('realtime')">📥 下载图文</button>
+                    </div>
                 </div>
-                <div id="realtimeSummaryText" class="summary-content"></div>
+                <div class="summary-view-tabs">
+                    <button type="button" id="realtimeTabMarkdown" class="summary-view-tab active" onclick="switchSummaryTab('realtime','markdown')">文字速览</button>
+                    <button type="button" id="realtimeTabVisual" class="summary-view-tab" onclick="switchSummaryTab('realtime','visual')">图文速览</button>
+                </div>
+                <div id="realtimeSummaryMarkdown" class="summary-content"></div>
+                <div id="realtimeSummaryVisual" class="visual-summary-root" style="display:none;"></div>
+                <p class="visual-disclaimer">图文内容由 AI 根据转写整理，如有出入以转写原文为准。</p>
             </div>
                     
             <div class="info-box">
@@ -831,9 +1063,18 @@
             <div id="summaryResult" class="summary-container" style="display: none;">
                 <div class="summary-header">
                     <div class="summary-title" style="margin-bottom:0;">📝 AI 智能速览</div>
-                    <button class="btn-export" onclick="exportSummary('batch')">📥 导出 Word</button>
+                    <div class="summary-export-actions">
+                        <button class="btn-export" onclick="exportSummary('batch')">📥 导出 Word</button>
+                        <button type="button" id="batchExportVisualBtn" class="btn-export-visual" onclick="exportVisual('batch')">📥 下载图文</button>
+                    </div>
                 </div>
-                <div id="summaryText" class="summary-content"></div>
+                <div class="summary-view-tabs">
+                    <button type="button" id="batchTabMarkdown" class="summary-view-tab active" onclick="switchSummaryTab('batch','markdown')">文字速览</button>
+                    <button type="button" id="batchTabVisual" class="summary-view-tab" onclick="switchSummaryTab('batch','visual')">图文速览</button>
+                </div>
+                <div id="batchSummaryMarkdown" class="summary-content"></div>
+                <div id="batchSummaryVisual" class="visual-summary-root" style="display:none;"></div>
+                <p class="visual-disclaimer">图文内容由 AI 根据转写整理，如有出入以转写原文为准。</p>
             </div>
             
             <div class="info-box">
@@ -916,13 +1157,30 @@
                 <div id="pendingRequestsList"><p style="color:#999;">暂无待审批</p></div>
             </div>
 
-            <div id="rootAdminSection" style="display:none; margin-top: 25px;">
+            <div id="rootAdminSection" class="root-admin-actions" style="display:none; margin-top: 25px;">
                 <button type="button" class="btn-primary" onclick="openAdminModal()" style="padding: 12px 24px;">
                     👥 用户管理
+                </button>
+                <button type="button" class="btn-primary" onclick="openAdminReviewLogModal()" style="padding: 12px 24px; background: #5c6bc0;">
+                    📋 管理员审批记录
                 </button>
             </div>
         </div>
     </div>
+    </div>
+
+    <!-- 超级管理员：管理员审批记录二级弹窗 -->
+    <div id="reviewLogModalOverlay" class="admin-modal-overlay" onclick="if(event.target===this) closeAdminReviewLogModal()">
+        <div class="admin-modal-box" onclick="event.stopPropagation()">
+            <div class="admin-modal-header">
+                <h3>📋 管理员审批记录</h3>
+                <button type="button" class="admin-modal-close" onclick="closeAdminReviewLogModal()" title="关闭">&times;</button>
+            </div>
+            <div class="admin-modal-body">
+                <p class="admin-modal-hint">管理员对「查看全部会议」申请的处理历史（已通过 / 已拒绝）。</p>
+                <div id="adminReviewLogList"><p style="color:#999;">加载中...</p></div>
+            </div>
+        </div>
     </div>
 
     <!-- 超级管理员：用户管理二级弹窗 -->
@@ -1117,7 +1375,7 @@
             }
 
             document.getElementById('rootAdminSection').style.display =
-                currentUser.role === 'root' ? 'block' : 'none';
+                currentUser.role === 'root' ? 'flex' : 'none';
         }
 
         function openAdminModal() {
@@ -1127,6 +1385,15 @@
 
         function closeAdminModal() {
             document.getElementById('adminModalOverlay').classList.remove('active');
+        }
+
+        function openAdminReviewLogModal() {
+            document.getElementById('reviewLogModalOverlay').classList.add('active');
+            loadAdminReviewLog();
+        }
+
+        function closeAdminReviewLogModal() {
+            document.getElementById('reviewLogModalOverlay').classList.remove('active');
         }
 
         function hideAdminPermPanels(userId) {
@@ -1192,6 +1459,44 @@
                         <div style="color:#666;font-size:13px;margin-top:6px;">${r.reason || '无说明'}</div>
                         <div style="color:#999;font-size:12px;margin-top:4px;">${new Date(r.created_at).toLocaleString('zh-CN')}</div>
                         ${r.review_note ? `<div style="color:#666;font-size:12px;margin-top:4px;">审批备注：${r.review_note}</div>` : ''}
+                    </div>`;
+                }).join('');
+            } catch (e) {
+                el.innerHTML = '<p style="color:#f44336;">加载失败</p>';
+            }
+        }
+
+        async function loadAdminReviewLog() {
+            const el = document.getElementById('adminReviewLogList');
+            try {
+                const resp = await authFetch('/api/auth/requests/review-history');
+                const data = await resp.json();
+                if (!resp.ok) {
+                    el.innerHTML = '<p style="color:#f44336;">' + escapeHtml(data.detail || '加载失败') + '</p>';
+                    return;
+                }
+                if (!data.requests || data.requests.length === 0) {
+                    el.innerHTML = '<p style="color:#999;">暂无审批记录</p>';
+                    return;
+                }
+                el.innerHTML = data.requests.map(r => {
+                    const typeLabel = REQUEST_TYPE_LABELS[r.request_type] || r.request_type;
+                    const statusLabel = { pending: '待审批', approved: '已通过', rejected: '已拒绝' }[r.status];
+                    const statusClass = 'request-status-' + r.status;
+                    const reviewedAt = r.reviewed_at
+                        ? new Date(r.reviewed_at).toLocaleString('zh-CN')
+                        : '—';
+                    return `<div class="request-card">
+                        <div>
+                            <strong>${escapeHtml(r.nickname || r.username)}</strong> 申请 <strong>${typeLabel}</strong>
+                            · <span class="${statusClass}">${statusLabel}</span>
+                        </div>
+                        <div style="color:#666;font-size:13px;margin:6px 0;">${escapeHtml(r.reason || '无说明')}</div>
+                        <div style="color:#999;font-size:12px;">
+                            审批人：<strong>${escapeHtml(r.reviewer_username || '未知')}</strong>
+                            · ${reviewedAt}
+                        </div>
+                        ${r.review_note ? `<div style="color:#666;font-size:12px;margin-top:4px;">备注：${escapeHtml(r.review_note)}</div>` : ''}
                     </div>`;
                 }).join('');
             } catch (e) {
@@ -1481,6 +1786,25 @@
             }
         }
 
+        function downloadBlobResponse(response, defaultFilename) {
+            const disposition = response.headers.get('Content-Disposition') || '';
+            let filename = defaultFilename;
+            const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+            const plainMatch = disposition.match(/filename="([^"]+)"/i);
+            if (utf8Match) filename = decodeURIComponent(utf8Match[1]);
+            else if (plainMatch) filename = plainMatch[1];
+            return response.blob().then(blob => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+            });
+        }
+
         async function exportSummaryDocx({ fileId, content, title }) {
             try {
                 let response;
@@ -1501,29 +1825,44 @@
                     alert(err.detail || '导出失败');
                     return;
                 }
-                const blob = await response.blob();
-                const disposition = response.headers.get('Content-Disposition') || '';
-                let filename = 'AI智能速览.docx';
-                const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
-                const plainMatch = disposition.match(/filename="([^"]+)"/i);
-                if (utf8Match) filename = decodeURIComponent(utf8Match[1]);
-                else if (plainMatch) filename = plainMatch[1];
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-                URL.revokeObjectURL(url);
+                await downloadBlobResponse(response, 'AI智能速览.docx');
             } catch (e) {
                 alert('导出失败: ' + e.message);
             }
         }
 
+        async function exportVisualHtml({ fileId, visual, title, format = 'html' }) {
+            try {
+                let response;
+                const fmt = format === 'json' ? 'json' : 'html';
+                if (fileId) {
+                    response = await authFetch(`/api/meetings/${fileId}/export/visual?format=${fmt}`);
+                } else if (visual) {
+                    response = await authFetch(`/api/export/visual?format=${fmt}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ visual, title: title || 'AI 智能速览' }),
+                    });
+                } else {
+                    alert('无可下载的图文速览');
+                    return;
+                }
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    alert(err.detail || '下载失败');
+                    return;
+                }
+                const defaultName = fmt === 'json' ? '图文速览.json' : '图文速览.html';
+                await downloadBlobResponse(response, defaultName);
+            } catch (e) {
+                alert('下载失败: ' + e.message);
+            }
+        }
+
         function exportSummary(source) {
             if (source === 'realtime') {
-                const content = document.getElementById('realtimeSummaryText').textContent.trim();
+                const mdEl = document.getElementById('realtimeSummaryMarkdown');
+                const content = (mdEl ? mdEl.textContent : '').trim();
                 const meetingName = document.getElementById('meetingNameInput').value.trim();
                 exportSummaryDocx({
                     fileId: lastRealtimeFileId,
@@ -1531,7 +1870,8 @@
                     title: meetingName || 'AI 智能速览',
                 });
             } else if (source === 'batch') {
-                const content = document.getElementById('summaryText').textContent.trim();
+                const mdEl = document.getElementById('batchSummaryMarkdown');
+                const content = (mdEl ? mdEl.textContent : '').trim();
                 exportSummaryDocx({
                     fileId: lastBatchFileId,
                     content: lastBatchFileId ? null : content,
@@ -1540,8 +1880,31 @@
             }
         }
 
+        function exportVisual(source, format) {
+            if (source === 'realtime') {
+                const meetingName = document.getElementById('meetingNameInput').value.trim();
+                exportVisualHtml({
+                    fileId: lastRealtimeFileId,
+                    visual: lastRealtimeFileId ? null : lastRealtimeVisual,
+                    title: meetingName || 'AI 智能速览',
+                    format,
+                });
+            } else if (source === 'batch') {
+                exportVisualHtml({
+                    fileId: lastBatchFileId,
+                    visual: lastBatchFileId ? null : lastBatchVisual,
+                    title: lastBatchSummaryTitle,
+                    format,
+                });
+            }
+        }
+
         function exportHistorySummary(fileId, title) {
             exportSummaryDocx({ fileId, title: title || 'AI 智能速览' });
+        }
+
+        function exportHistoryVisual(fileId, title, format) {
+            exportVisualHtml({ fileId, title: title || 'AI 智能速览', format });
         }
 
         // ========== 原有功能 ==========
@@ -1555,7 +1918,9 @@
         let pollFallbackTimer = null;
         let selectedFile = null;
         let lastRealtimeFileId = null;
+        let lastRealtimeVisual = null;
         let lastBatchFileId = null;
+        let lastBatchVisual = null;
         let lastBatchSummaryTitle = 'AI 智能速览';
         
         const statusEl = document.getElementById('status');
@@ -1648,6 +2013,115 @@
             }
         }
 
+        const VISUAL_ICONS = {
+            doc: '📄', trophy: '🏆', people: '👥', policy: '📋', chat: '💬',
+            star: '⭐', calendar: '📅', money: '💰', check: '✅', warn: '⚠️',
+        };
+
+        function switchSummaryTab(prefix, tab) {
+            const mdEl = document.getElementById(prefix + 'SummaryMarkdown');
+            const visEl = document.getElementById(prefix + 'SummaryVisual');
+            const btnMd = document.getElementById(prefix + 'TabMarkdown');
+            const btnVis = document.getElementById(prefix + 'TabVisual');
+            if (!mdEl || !visEl) return;
+            const isMd = tab === 'markdown';
+            mdEl.style.display = isMd ? 'block' : 'none';
+            visEl.style.display = isMd ? 'none' : 'block';
+            if (btnMd) btnMd.classList.toggle('active', isMd);
+            if (btnVis) btnVis.classList.toggle('active', !isMd);
+        }
+
+        function renderVisualSummary(container, visual, status) {
+            if (!container) return;
+            if (!visual) {
+                if (status === 'failed') {
+                    container.innerHTML = '<p style="color:#e74c3c;text-align:center;padding:20px;">图文速览生成失败，请稍后刷新或查看文字速览。</p>';
+                } else {
+                    container.innerHTML = '<p style="color:#999;text-align:center;padding:20px;">暂无图文速览</p>';
+                }
+                return;
+            }
+            let html = '';
+            if (visual.title) {
+                html += `<div class="visual-summary-title">${escapeHtml(visual.title)}</div>`;
+            }
+            if (visual.subtitle) {
+                html += `<div class="visual-summary-subtitle">${escapeHtml(visual.subtitle)}</div>`;
+            }
+            (visual.sections || []).forEach((sec, idx) => {
+                const theme = sec.theme || 'green';
+                const layout = sec.layout || 'grid-3';
+                const secId = sec.id || String(idx + 1).padStart(2, '0');
+                html += `<div class="visual-section theme-${theme}">
+                    <div class="visual-section-head">
+                        <div class="visual-section-num">${escapeHtml(secId)}</div>
+                        <div class="visual-section-title">${escapeHtml(sec.title || '')}</div>
+                    </div>
+                    <div class="visual-cards layout-${layout}">`;
+                (sec.cards || []).forEach(card => {
+                    const icon = VISUAL_ICONS[card.icon] || '📄';
+                    html += `<div class="visual-card">
+                        <div class="visual-card-head">
+                            <span class="visual-card-icon">${icon}</span>
+                            <span class="visual-card-title">${escapeHtml(card.title || '')}</span>
+                            ${card.tag ? `<span class="visual-card-tag">${escapeHtml(card.tag)}</span>` : ''}
+                        </div>
+                        <ul class="visual-card-bullets">
+                            ${(card.bullets || []).map(b => `<li>${escapeHtml(b)}</li>`).join('')}
+                        </ul>
+                        ${card.highlight ? `<div class="visual-card-highlight">${escapeHtml(card.highlight)}</div>` : ''}
+                    </div>`;
+                });
+                html += `</div></div>`;
+            });
+            const footer = visual.footer || {};
+            if (footer.core_consensus) {
+                html += `<div class="visual-footer-block">
+                    <h4>核心共识</h4>
+                    <p style="margin:0;color:#555;line-height:1.7;">${escapeHtml(footer.core_consensus)}</p>
+                </div>`;
+            }
+            if (footer.contacts && footer.contacts.length) {
+                html += `<div class="visual-footer-block"><h4>联系人</h4><ul class="visual-card-bullets">
+                    ${footer.contacts.map(c => `<li>${escapeHtml(c)}</li>`).join('')}</ul></div>`;
+            }
+            if (footer.next_steps && footer.next_steps.length) {
+                html += `<div class="visual-footer-block"><h4>下一步</h4><ul class="visual-card-bullets">
+                    ${footer.next_steps.map(s => `<li>${escapeHtml(s)}</li>`).join('')}</ul></div>`;
+            }
+            container.innerHTML = html;
+        }
+
+        function displayDualSummary(prefix, payload) {
+            const boxId = prefix === 'batch' ? 'summaryResult'
+                : (prefix === 'history' ? null : (prefix + 'Summary'));
+            const box = boxId ? document.getElementById(boxId)
+                : document.getElementById('historySummaryMarkdown')?.closest('.summary-container');
+            if (!box) return;
+            const summary = payload.summary;
+            const visual = payload.summary_visual;
+            const status = payload.summary_visual_status;
+            if (!summary && !visual) {
+                box.style.display = 'none';
+                return;
+            }
+            box.style.display = 'block';
+            const mdEl = document.getElementById(prefix + 'SummaryMarkdown');
+            if (mdEl) mdEl.textContent = summary || '暂无文字速览';
+            renderVisualSummary(document.getElementById(prefix + 'SummaryVisual'), visual, status);
+            const btnVis = document.getElementById(prefix + 'TabVisual');
+            if (btnVis) {
+                btnVis.disabled = !visual && status === 'failed';
+            }
+            const exportVisBtn = document.getElementById(prefix + 'ExportVisualBtn');
+            if (exportVisBtn) {
+                exportVisBtn.disabled = !visual && status !== 'completed';
+            }
+            if (prefix === 'realtime') lastRealtimeVisual = visual || null;
+            if (prefix === 'batch') lastBatchVisual = visual || null;
+            switchSummaryTab(prefix, 'markdown');
+        }
+
         function applySessionResult(data) {
             sessionEnding = false;
             pollAbort = true;
@@ -1662,12 +2136,7 @@
             }
             currentTextEl.textContent = '会话已结束';
 
-            if (data.summary) {
-                const summaryEl = document.getElementById('realtimeSummary');
-                const summaryTextEl = document.getElementById('realtimeSummaryText');
-                summaryTextEl.textContent = data.summary;
-                summaryEl.style.display = 'block';
-            }
+            displayDualSummary('realtime', data);
             if (data.file_id) {
                 lastRealtimeFileId = data.file_id;
             }
@@ -1678,6 +2147,9 @@
 
             if (data.error) {
                 alert('警告: ' + data.error);
+            }
+            if (data.summary_visual_status === 'failed' && data.summary_visual_error) {
+                console.warn('图文速览:', data.summary_visual_error);
             }
         }
 
@@ -1692,6 +2164,8 @@
                         applySessionResult({
                             total_text: data.transcript,
                             summary: data.summary,
+                            summary_visual: data.summary_visual,
+                            summary_visual_status: data.summary_visual_status,
                         });
                         if (ws && ws.readyState === WebSocket.OPEN) {
                             ws.close();
@@ -1811,12 +2285,12 @@
                 if (data.total_text) {
                     renderTotalText(data.total_text);
                 }
-                currentTextEl.textContent = '转写完成，正在生成 AI 智能速览...';
+                currentTextEl.textContent = '转写完成，正在生成文字与图文速览...';
             } else if (data.type === 'generating_summary') {
                 if (data.file_id) {
                     pendingFileId = data.file_id;
                 }
-                currentTextEl.textContent = data.message || '正在生成 AI 智能速览...';
+                currentTextEl.textContent = data.message || '正在生成文字与图文速览...';
                 stopBtn.disabled = true;
                 stopBtn.innerHTML = '<span class="loading"></span>生成中...';
                 // 兜底：WebSocket 长时间无响应时通过 HTTP 拉取结果
@@ -1895,7 +2369,12 @@
                     pollFallbackTimer = null;
                 }
                 document.getElementById('realtimeSummary').style.display = 'none';
-                document.getElementById('realtimeSummaryText').textContent = '';
+                const rtMd = document.getElementById('realtimeSummaryMarkdown');
+                const rtVis = document.getElementById('realtimeSummaryVisual');
+                if (rtMd) rtMd.textContent = '';
+                if (rtVis) rtVis.innerHTML = '';
+                lastRealtimeVisual = null;
+                lastRealtimeFileId = null;
                 totalTextEl.textContent = '';
 
                 // 获取会议名称
@@ -2085,7 +2564,6 @@
             const transcriptResult = document.getElementById('transcriptResult');
             const summaryResult = document.getElementById('summaryResult');
             const transcriptText = document.getElementById('transcriptText');
-            const summaryText = document.getElementById('summaryText');
             
             // 获取会议名称
             const meetingName = document.getElementById('batchMeetingNameInput').value.trim();
@@ -2119,9 +2597,11 @@
                     transcriptText.textContent = result.transcript;
                     transcriptResult.style.display = 'block';
                     
-                    // 显示 AI 总结
-                    summaryText.textContent = result.summary;
-                    summaryResult.style.display = 'block';
+                    displayDualSummary('batch', {
+                        summary: result.summary,
+                        summary_visual: result.summary_visual,
+                        summary_visual_status: result.summary_visual_status,
+                    });
                     
                     uploadBtn.innerHTML = '✓ 处理完成';
                     uploadBtn.style.background = '#4caf50';
@@ -2206,7 +2686,7 @@
                                 </div>
                                 <div style="color: #666; font-size: 14px; margin-bottom: 8px;">
                                     ${meeting.transcript_length ? `文本长度: ${meeting.transcript_length} 字符 | ` : ''}
-                                    ${meeting.has_summary ? '✅ 有总结' : '❌ 无总结'}
+                                    ${meeting.has_summary ? '✅ 文字总结' : ''}${meeting.has_visual_summary ? ' ✅ 图文' : ''}${!meeting.has_summary && !meeting.has_visual_summary ? '❌ 无总结' : ''}
                                 </div>
                                 <div style="color: #999; font-size: 13px; background: #f5f5f5; padding: 8px; border-radius: 5px;">
                                     ${(meeting.preview || '').substring(0, 150)}...
@@ -2249,19 +2729,31 @@
                         </div>
                     `;
                     
-                    if (data.summary) {
+                    if (data.summary || data.summary_visual) {
                         html += `
-                            <div style="margin-bottom: 30px;">
-                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                                    <h3 style="color: #f57c00; margin:0;">📊 AI 智能速览</h3>
-                                    <button class="btn-export" onclick="exportHistorySummary('${fileId}')">📥 导出 Word</button>
+                            <div class="summary-container" style="margin-bottom:30px;">
+                                <div class="summary-header">
+                                    <div class="summary-title" style="margin-bottom:0;">📊 AI 智能速览</div>
+                                    <div class="summary-export-actions">
+                                        <button class="btn-export" onclick="exportHistorySummary('${fileId}')">📥 导出 Word</button>
+                                        <button type="button" class="btn-export-visual" ${data.summary_visual ? '' : 'disabled'} onclick="exportHistoryVisual('${fileId}')">📥 下载图文</button>
+                                    </div>
                                 </div>
-                                <div style="background: #fff9e6; padding: 20px; border-radius: 10px; line-height: 1.8; white-space: pre-wrap; border-left: 4px solid #ffa726;">${data.summary}</div>
+                                <div class="summary-view-tabs">
+                                    <button type="button" id="historyTabMarkdown" class="summary-view-tab active" onclick="switchSummaryTab('history','markdown')">文字速览</button>
+                                    <button type="button" id="historyTabVisual" class="summary-view-tab" onclick="switchSummaryTab('history','visual')">图文速览</button>
+                                </div>
+                                <div id="historySummaryMarkdown" class="summary-content"></div>
+                                <div id="historySummaryVisual" class="visual-summary-root" style="display:none;"></div>
+                                <p class="visual-disclaimer">图文内容由 AI 根据转写整理，如有出入以转写原文为准。</p>
                             </div>
                         `;
                     }
                     
                     listEl.innerHTML = html;
+                    if (data.summary || data.summary_visual) {
+                        displayDualSummary('history', data);
+                    }
                 } else {
                     listEl.innerHTML = `<p style="text-align: center; color: #f44336;">${data.error || '加载失败'}</p>`;
                 }

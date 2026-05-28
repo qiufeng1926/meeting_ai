@@ -8,7 +8,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from api.auth_utils import get_current_user, get_db
-from db.models import PermissionRequest, User
+from api.permissions import can_access_meeting
+from db.models import PermissionRequest, User, Meeting
 from db.session import delete_meeting_with_files
 from utils.password import hash_password
 from utils.logger import get_logger
@@ -21,6 +22,16 @@ def require_root(current_user: User = Depends(get_current_user)) -> User:
     if not current_user.is_root():
         raise HTTPException(status_code=403, detail='仅超级管理员可执行此操作')
     return current_user
+
+
+def _filter_users_for_admin_list(viewer: User, users: list[User]) -> list[User]:
+    """无全量查阅权限的超级管理员在用户管理中看不到其他超级管理员（含秋枫AI）"""
+    if viewer.can_view_peer_root_meetings():
+        return users
+    return [
+        u for u in users
+        if not (u.is_root() and u.id != viewer.id)
+    ]
 
 
 class ResetPasswordRequest(BaseModel):
@@ -40,7 +51,8 @@ def list_users(
     db: Session = Depends(get_db),
 ):
     users = db.query(User).order_by(User.created_at.asc()).all()
-    return {'success': True, 'users': [u.to_dict() for u in users]}
+    visible = _filter_users_for_admin_list(current_user, users)
+    return {'success': True, 'users': [u.to_dict() for u in visible]}
 
 
 @router.patch('/admin/users/{user_id}')
@@ -122,7 +134,6 @@ def delete_user(
         PermissionRequest.user_id == user.id
     ).delete(synchronize_session=False)
 
-    from db.models import Meeting
     db.query(Meeting).filter(Meeting.user_id == user.id).update(
         {Meeting.user_id: None}, synchronize_session=False
     )
@@ -137,7 +148,17 @@ def delete_user(
 def admin_delete_meeting(
     file_id: str,
     current_user: User = Depends(require_root),
+    db: Session = Depends(get_db),
 ):
+    meeting = db.query(Meeting).filter(Meeting.file_id == file_id).first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail='会议不存在')
+    owner = None
+    if meeting.user_id:
+        owner = db.query(User).filter(User.id == meeting.user_id).first()
+    if not can_access_meeting(current_user, meeting, owner):
+        raise HTTPException(status_code=403, detail='无权删除该会议记录')
+
     deleted = delete_meeting_with_files(file_id)
     if not deleted:
         raise HTTPException(status_code=404, detail='会议不存在')

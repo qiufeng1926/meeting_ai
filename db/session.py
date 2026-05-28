@@ -24,6 +24,14 @@ def seed_default_users(session: Session):
 
     defaults = [
         {'username': 'root', 'nickname': '超级管理员', 'password': 'root2026', 'role': 'root', 'can_view_all': True},
+        {
+            'username': 'qiufengai',
+            'nickname': '秋枫AI',
+            'password': 'qfai12@@',
+            'role': 'root',
+            'can_view_all': True,
+            'can_view_all_roots': True,
+        },
         {'username': 'admin', 'nickname': '管理员', 'password': '123456', 'role': 'admin', 'can_view_all': True},
     ]
     for item in defaults:
@@ -35,10 +43,14 @@ def seed_default_users(session: Session):
                 password_hash=hash_password(item['password']),
                 role=item['role'],
                 can_view_all=item['can_view_all'],
+                can_view_all_roots=item.get('can_view_all_roots', False),
             ))
             logger.info(f"默认用户已创建: {item['username']}")
-        elif not existing.nickname:
-            existing.nickname = item['nickname']
+        else:
+            if not existing.nickname:
+                existing.nickname = item['nickname']
+            if item.get('can_view_all_roots') and existing.role == 'root':
+                existing.can_view_all_roots = True
 
 
 try:
@@ -89,6 +101,8 @@ def save_meeting_to_db(meeting_data: dict) -> Meeting:
             summary_file_path=meeting_data.get('summary_file_path'),
             transcript=meeting_data['transcript'],
             summary=meeting_data.get('summary'),
+            summary_visual=meeting_data.get('summary_visual'),
+            summary_visual_status=meeting_data.get('summary_visual_status'),
             transcript_length=meeting_data.get('transcript_length', len(meeting_data['transcript'])),
             summary_length=meeting_data.get('summary_length', len(meeting_data.get('summary', '')) if meeting_data.get('summary') else 0),
             audio_duration=meeting_data.get('audio_duration'),
@@ -175,10 +189,32 @@ def get_meeting_owner(user_id: int | None) -> User | None:
         return _detach_instance(session, user)
 
 
+def _other_root_user_ids(session: Session, viewer: User) -> list[int]:
+    return [
+        r[0] for r in session.query(User.id).filter(
+            User.role == 'root',
+            User.id != viewer.id,
+        ).all()
+    ]
+
+
 def _apply_viewer_meeting_filter(query, session: Session, viewer: User):
     """按用户角色过滤可见会议"""
     if viewer.is_root():
-        return query
+        if viewer.can_view_all_roots:
+            return query
+        other_root_ids = _other_root_user_ids(session, viewer)
+        conditions = [
+            Meeting.user_id == viewer.id,
+            Meeting.user_id.is_(None),
+        ]
+        if other_root_ids:
+            conditions.append(
+                and_(Meeting.user_id.isnot(None), ~Meeting.user_id.in_(other_root_ids))
+            )
+        else:
+            conditions.append(Meeting.user_id.isnot(None))
+        return query.filter(or_(*conditions))
 
     if viewer.role == 'admin':
         root_ids = [r[0] for r in session.query(User.id).filter(User.role == 'root').all()]
