@@ -346,6 +346,12 @@ meeting_ai/
 | `GLM_API_KEY` | 智谱 AI API Key | 必填 |
 | `GLM_MODEL` | GLM 模型名称 | `glm-4-flash` |
 | `GLM_TEMPERATURE` | 温度参数（0-1） | `0.3` |
+| `VISUAL_SUMMARY_RETRY_MAX` | 图文速览生成失败重试次数 | `2` |
+| `VISUAL_CHUNK_CHARS` | 超过该字数则分段生成图文 | `6000` |
+| `VISUAL_CHUNK_OVERLAP` | 图文分段重叠字数 | `400` |
+| `VISUAL_JSON_REPAIR` | JSON 解析失败时自动修复 | `true` |
+| `JWT_SECRET` | 登录 Token 密钥 | 生产环境务必修改 |
+| `JWT_EXPIRE_HOURS` | Token 有效期（小时） | `72` |
 | `ALIBABA_CLOUD_ACCESS_KEY_ID` | 阿里云 AccessKey ID（听悟实时） | 必填 |
 | `ALIBABA_CLOUD_ACCESS_KEY_SECRET` | 阿里云 AccessKey Secret | 必填 |
 | `TINGWU_APP_KEY` | 听悟控制台 AppKey | 必填 |
