@@ -8,6 +8,15 @@ from typing import Any
 VISUAL_ICONS = {
     'doc': '📄', 'trophy': '🏆', 'people': '👥', 'policy': '📋', 'chat': '💬',
     'star': '⭐', 'calendar': '📅', 'money': '💰', 'check': '✅', 'warn': '⚠️',
+    'idea': '💡', 'target': '🎯', 'handshake': '🤝', 'chart': '📊', 'time': '⏱️',
+}
+
+TAG_CSS = {
+    '重点': 'tag-focus',
+    '待跟进': 'tag-todo',
+    '已决策': 'tag-done',
+    '风险': 'tag-risk',
+    '待确认': 'tag-pending',
 }
 
 _EXPORT_CSS = """
@@ -34,6 +43,13 @@ body { font-family: "Microsoft YaHei", "PingFang SC", sans-serif; background: #f
 .visual-card-highlight { font-size: 12px; padding: 8px 10px; border-radius: 6px; margin-top: 8px; }
 .visual-footer-block { background: white; border-radius: 10px; padding: 16px; margin-top: 12px; border: 1px solid #eee; }
 .visual-footer-block h4 { margin: 0 0 10px 0; color: #667eea; font-size: 15px; }
+.visual-consensus-banner { background: linear-gradient(135deg, #667eea15, #764ba215); border-left: 4px solid #667eea; border-radius: 10px; padding: 16px 18px; margin-bottom: 20px; }
+.visual-consensus-banner h4 { margin: 0 0 8px 0; color: #667eea; font-size: 15px; }
+.visual-card-tag.tag-focus { background: #fff3e0; color: #e65100; }
+.visual-card-tag.tag-todo { background: #e3f2fd; color: #1565c0; }
+.visual-card-tag.tag-done { background: #e8f5e9; color: #2e7d32; }
+.visual-card-tag.tag-risk { background: #ffebee; color: #c62828; }
+.visual-card-tag.tag-pending { background: #f3e5f5; color: #7b1fa2; }
 .disclaimer { font-size: 12px; color: #999; text-align: center; margin-top: 20px; }
 .theme-green .visual-section-num { background: #27ae60; }
 .theme-green .visual-card-highlight { background: #e8f8ef; color: #27ae60; }
@@ -69,6 +85,12 @@ def _layout_class(layout: str | None) -> str:
     return 'layout-grid-3'
 
 
+def _tag_class(tag: str | None) -> str:
+    if not tag:
+        return 'visual-card-tag'
+    return 'visual-card-tag ' + TAG_CSS.get(tag, '')
+
+
 def _render_body_html(visual: dict[str, Any]) -> str:
     parts: list[str] = []
     title = visual.get('title')
@@ -77,6 +99,13 @@ def _render_body_html(visual: dict[str, Any]) -> str:
         parts.append(f'<div class="page-title">{_esc(title)}</div>')
     if subtitle:
         parts.append(f'<div class="page-subtitle">{_esc(subtitle)}</div>')
+
+    footer = visual.get('footer') or {}
+    if footer.get('core_consensus'):
+        parts.append('<div class="visual-consensus-banner">')
+        parts.append('<h4>核心共识</h4>')
+        parts.append(f'<p style="margin:0;line-height:1.7;color:#444;">{_esc(footer.get("core_consensus"))}</p>')
+        parts.append('</div>')
 
     parts.append('<div class="visual-summary-root">')
     for idx, sec in enumerate(visual.get('sections') or []):
@@ -98,7 +127,7 @@ def _render_body_html(visual: dict[str, Any]) -> str:
             parts.append(f'<span>{icon}</span>')
             parts.append(f'<span class="visual-card-title">{_esc(card.get("title"))}</span>')
             if card.get('tag'):
-                parts.append(f'<span class="visual-card-tag">{_esc(card.get("tag"))}</span>')
+                parts.append(f'<span class="{_tag_class(card.get("tag"))}">{_esc(card.get("tag"))}</span>')
             parts.append('</div>')
             bullets = card.get('bullets') or []
             if bullets:
@@ -112,9 +141,6 @@ def _render_body_html(visual: dict[str, Any]) -> str:
         parts.append('</div></div>')
 
     footer = visual.get('footer') or {}
-    if footer.get('core_consensus'):
-        parts.append('<div class="visual-footer-block"><h4>核心共识</h4>')
-        parts.append(f'<p style="margin:0;line-height:1.7;color:#555;">{_esc(footer.get("core_consensus"))}</p></div>')
     if footer.get('contacts'):
         parts.append('<div class="visual-footer-block"><h4>联系人</h4><ul class="visual-card-bullets">')
         for c in footer['contacts']:

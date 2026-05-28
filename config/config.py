@@ -45,6 +45,12 @@ glm_temperature = float(_env("GLM_TEMPERATURE", "0.3") or "0.3")
 
 # 图文速览（与 Markdown 并行生成，每场必生成）
 visual_summary_retry_max = int(_env("VISUAL_SUMMARY_RETRY_MAX", "2") or "2")
+visual_chunk_chars = int(_env("VISUAL_CHUNK_CHARS", "6000") or "6000")
+visual_chunk_overlap = int(_env("VISUAL_CHUNK_OVERLAP", "400") or "400")
+visual_json_repair = _env_bool("VISUAL_JSON_REPAIR", "true")
+
+# 并发：实时转写与批量处理共存时的限流
+llm_summary_max_concurrent = int(_env("LLM_SUMMARY_MAX_CONCURRENT", "2") or "2")
 
 # 文件路径配置
 upload_dir = _path_from_env("UPLOAD_DIR", "upload")

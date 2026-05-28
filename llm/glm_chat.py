@@ -1,8 +1,8 @@
 import os
 import asyncio
 from zhipuai import ZhipuAI
-from concurrent.futures import ThreadPoolExecutor
 from utils.logger import get_logger
+from utils.executors import io_executor
 
 logger = get_logger("glm_client")
 
@@ -14,7 +14,13 @@ from llm.prompt import (
 from llm.prompt_visual import (
     SYSTEM_PROMPT_VISUAL,
     build_visual_prompt,
+    build_visual_chunk_prompt,
 )
+
+REPAIR_JSON_SYSTEM = """
+你是 JSON 修复工具。用户给出一段几乎正确但语法错误的 JSON，你只输出修复后的完整 JSON 对象。
+不要 Markdown、不要代码块、不要任何解释文字。
+"""
 
 
 class GLMClient:
@@ -35,9 +41,7 @@ class GLMClient:
         )
 
         self.model = model
-        
-        # 创建线程池用于异步执行
-        self.executor = ThreadPoolExecutor(max_workers=4)
+        self.executor = io_executor
 
     def chat(
         self,
@@ -102,22 +106,42 @@ class GLMClient:
         self,
         transcript: str,
         meeting_name: str | None = None,
+        part_index: int | None = None,
+        total_parts: int | None = None,
     ):
-        prompt = build_visual_prompt(transcript, meeting_name)
+        if part_index is not None and total_parts is not None and total_parts > 1:
+            prompt = build_visual_chunk_prompt(
+                transcript, meeting_name, part_index, total_parts
+            )
+        else:
+            prompt = build_visual_prompt(transcript, meeting_name)
         return self.chat(prompt, system_prompt=SYSTEM_PROMPT_VISUAL)
 
     async def summary_visual_async(
         self,
         transcript: str,
         meeting_name: str | None = None,
+        part_index: int | None = None,
+        total_parts: int | None = None,
     ):
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             self.executor,
-            self.summary_visual,
-            transcript,
-            meeting_name,
+            lambda: self.summary_visual(
+                transcript, meeting_name, part_index, total_parts
+            ),
         )
+
+    def repair_json(self, broken_text: str) -> str:
+        prompt = (
+            "请修复以下内容为合法 JSON（仅输出 JSON）：\n\n"
+            f"{broken_text[:14000]}"
+        )
+        return self.chat(prompt, temperature=0.1, system_prompt=REPAIR_JSON_SYSTEM)
+
+    async def repair_json_async(self, broken_text: str) -> str:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(self.executor, self.repair_json, broken_text)
 
 
 if __name__ == "__main__":

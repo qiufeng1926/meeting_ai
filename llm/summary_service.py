@@ -4,9 +4,22 @@
 import asyncio
 from dataclasses import dataclass
 
-from config.config import visual_summary_retry_max
+from config.config import (
+    visual_chunk_chars,
+    visual_chunk_overlap,
+    visual_json_repair,
+    visual_summary_retry_max,
+)
 from llm.glm_chat import GLMClient
-from llm.visual_schema import VisualSummary, parse_visual_summary, visual_summary_to_dict, visual_summary_to_json
+from llm.visual_schema import (
+    VisualSummary,
+    merge_visual_parts,
+    normalize_visual_summary,
+    parse_visual_summary_with_repair,
+    split_transcript_chunks,
+    visual_summary_to_dict,
+    visual_summary_to_json,
+)
 from utils.logger import get_logger
 
 logger = get_logger("summary_service")
@@ -22,6 +35,58 @@ class DualSummaryResult:
     visual_error: str | None
 
 
+async def _parse_raw_visual(client: GLMClient, raw: str) -> VisualSummary:
+    repair_fn = client.repair_json_async if visual_json_repair else None
+    return await parse_visual_summary_with_repair(raw, repair_fn=repair_fn)
+
+
+async def _generate_visual_once(
+    client: GLMClient,
+    transcript: str,
+    meeting_name: str | None,
+    part_index: int | None = None,
+    total_parts: int | None = None,
+) -> VisualSummary:
+    raw = await client.summary_visual_async(
+        transcript,
+        meeting_name,
+        part_index=part_index,
+        total_parts=total_parts,
+    )
+    return await _parse_raw_visual(client, raw)
+
+
+async def _generate_visual_chunked(
+    client: GLMClient,
+    transcript: str,
+    meeting_name: str | None,
+) -> VisualSummary:
+    chunks = split_transcript_chunks(
+        transcript,
+        max_chars=visual_chunk_chars,
+        overlap=visual_chunk_overlap,
+    )
+    if not chunks:
+        raise ValueError('转写为空')
+    if len(chunks) == 1:
+        return await _generate_visual_once(client, chunks[0], meeting_name)
+
+    logger.info(f"图文速览分 {len(chunks)} 段生成")
+    parts: list[VisualSummary] = []
+    for i, chunk in enumerate(chunks):
+        part = await _generate_visual_once(
+            client,
+            chunk,
+            meeting_name,
+            part_index=i + 1,
+            total_parts=len(chunks),
+        )
+        parts.append(part)
+
+    merged = merge_visual_parts(parts)
+    return normalize_visual_summary(merged)
+
+
 async def _generate_visual_with_retry(
     client: GLMClient,
     transcript: str,
@@ -29,10 +94,15 @@ async def _generate_visual_with_retry(
     max_retries: int,
 ) -> tuple[VisualSummary | None, str | None, str | None]:
     last_error = None
+    use_chunks = len(transcript) > visual_chunk_chars
+
     for attempt in range(max_retries + 1):
         try:
-            raw = await client.summary_visual_async(transcript, meeting_name)
-            visual = parse_visual_summary(raw)
+            if use_chunks:
+                visual = await _generate_visual_chunked(client, transcript, meeting_name)
+            else:
+                visual = await _generate_visual_once(client, transcript, meeting_name)
+                visual = normalize_visual_summary(visual)
             return visual, visual_summary_to_json(visual), None
         except Exception as e:
             last_error = str(e)
@@ -50,6 +120,17 @@ async def generate_dual_summaries(
     meeting_name: str | None = None,
 ) -> DualSummaryResult:
     """并行生成 Markdown 与图文 JSON；Markdown 失败则整体失败，图文失败可重试后标 failed"""
+    from utils.executors import get_llm_summary_semaphore
+
+    async with get_llm_summary_semaphore():
+        return await _generate_dual_summaries_inner(client, transcript, meeting_name)
+
+
+async def _generate_dual_summaries_inner(
+    client: GLMClient,
+    transcript: str,
+    meeting_name: str | None = None,
+) -> DualSummaryResult:
     markdown_task = asyncio.create_task(client.summary_meeting_async(transcript))
     visual_task = asyncio.create_task(
         _generate_visual_with_retry(client, transcript, meeting_name, visual_summary_retry_max)

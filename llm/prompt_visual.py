@@ -27,7 +27,7 @@ def build_visual_prompt(transcript: str, meeting_name: str | None = None) -> str
 2. 根据转写自然划分 3～8 个 section，每个 section 含 1～6 张 card
 3. section.title 为本场自拟话题名；layout 取 grid-2 | grid-3 | grid-4 | full 之一
 4. theme 取 green | orange | blue | pink | teal | brown | purple | red 之一，各 section 可不同
-5. card 字段：title, icon（简短英文如 doc/trophy/people/policy/chat，无合适用 doc）, tag（可选，如「重点」「待跟进」）, bullets（2～5 条字符串）, highlight（可选，一句收束）
+5. card 字段：title, icon（简短英文如 doc/trophy/people/policy/chat/money/calendar/star，无合适用 doc）, tag（可选，仅从：重点、待跟进、已决策、风险、待确认 中选）, bullets（2～5 条字符串）, highlight（可选，一句收束）
 6. footer：contacts（联系人/角色，无则 []）, next_steps（下一步，无则 []）, core_consensus（核心共识一段话，无则 null）
 7. 禁止输出转写中未出现的事实
 
@@ -60,5 +60,36 @@ def build_visual_prompt(transcript: str, meeting_name: str | None = None) -> str
 }}
 
 【转写内容】
+{transcript}
+"""
+
+
+def build_visual_chunk_prompt(
+    transcript: str,
+    meeting_name: str | None,
+    part_index: int,
+    total_parts: int,
+) -> str:
+    title_hint = meeting_name.strip() if meeting_name else ''
+    title_line = f'会议名称参考：{title_hint}' if title_hint else ''
+    footer_rule = (
+        'footer 中 contacts、next_steps 留空数组，core_consensus 为 null。'
+        if part_index < total_parts
+        else 'footer 可归纳本段出现的联系人、下一步与核心共识（仅本段已提及内容）。'
+    )
+
+    return f"""
+请根据以下会议转写片段，生成「图文速览」JSON 的 sections 部分（共 {total_parts} 段之第 {part_index} 段）。
+
+{title_line}
+{footer_rule}
+- 只输出一个合法 JSON 对象，不要 Markdown 或解释
+- 本段转写能支撑几个话题就几个 section（1～4 个），不要编造
+- 若 part_index 为 1，请填写合适的 title/subtitle；否则 title/subtitle 可与首段一致或简短占位
+- section.id 可临时用 "1","2"，后续会统一编号
+
+【JSON 结构】同标准图文速览（含 title, subtitle, sections, footer）
+
+【本段转写】
 {transcript}
 """

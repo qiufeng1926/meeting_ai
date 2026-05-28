@@ -372,6 +372,26 @@
             margin-bottom: 20px;
         }
 
+        .visual-consensus-banner {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.12), rgba(118, 75, 162, 0.1));
+            border-left: 4px solid #667eea;
+            border-radius: 10px;
+            padding: 16px 18px;
+            margin-bottom: 18px;
+        }
+
+        .visual-consensus-banner h4 {
+            margin: 0 0 8px 0;
+            color: #667eea;
+            font-size: 15px;
+        }
+
+        .visual-card-tag.tag-focus { background: #fff3e0; color: #e65100; }
+        .visual-card-tag.tag-todo { background: #e3f2fd; color: #1565c0; }
+        .visual-card-tag.tag-done { background: #e8f5e9; color: #2e7d32; }
+        .visual-card-tag.tag-risk { background: #ffebee; color: #c62828; }
+        .visual-card-tag.tag-pending { background: #f3e5f5; color: #7b1fa2; }
+
         .visual-section {
             margin-bottom: 24px;
         }
@@ -2016,7 +2036,18 @@
         const VISUAL_ICONS = {
             doc: '📄', trophy: '🏆', people: '👥', policy: '📋', chat: '💬',
             star: '⭐', calendar: '📅', money: '💰', check: '✅', warn: '⚠️',
+            idea: '💡', target: '🎯', handshake: '🤝', chart: '📊', time: '⏱️',
         };
+
+        const VISUAL_TAG_CLASS = {
+            '重点': 'tag-focus', '待跟进': 'tag-todo', '已决策': 'tag-done',
+            '风险': 'tag-risk', '待确认': 'tag-pending',
+        };
+
+        function visualTagClass(tag) {
+            if (!tag) return 'visual-card-tag';
+            return 'visual-card-tag ' + (VISUAL_TAG_CLASS[tag] || '');
+        }
 
         function switchSummaryTab(prefix, tab) {
             const mdEl = document.getElementById(prefix + 'SummaryMarkdown');
@@ -2048,6 +2079,13 @@
             if (visual.subtitle) {
                 html += `<div class="visual-summary-subtitle">${escapeHtml(visual.subtitle)}</div>`;
             }
+            const footer = visual.footer || {};
+            if (footer.core_consensus) {
+                html += `<div class="visual-consensus-banner">
+                    <h4>核心共识</h4>
+                    <p style="margin:0;line-height:1.7;color:#444;">${escapeHtml(footer.core_consensus)}</p>
+                </div>`;
+            }
             (visual.sections || []).forEach((sec, idx) => {
                 const theme = sec.theme || 'green';
                 const layout = sec.layout || 'grid-3';
@@ -2064,7 +2102,7 @@
                         <div class="visual-card-head">
                             <span class="visual-card-icon">${icon}</span>
                             <span class="visual-card-title">${escapeHtml(card.title || '')}</span>
-                            ${card.tag ? `<span class="visual-card-tag">${escapeHtml(card.tag)}</span>` : ''}
+                            ${card.tag ? `<span class="${visualTagClass(card.tag)}">${escapeHtml(card.tag)}</span>` : ''}
                         </div>
                         <ul class="visual-card-bullets">
                             ${(card.bullets || []).map(b => `<li>${escapeHtml(b)}</li>`).join('')}
@@ -2074,13 +2112,6 @@
                 });
                 html += `</div></div>`;
             });
-            const footer = visual.footer || {};
-            if (footer.core_consensus) {
-                html += `<div class="visual-footer-block">
-                    <h4>核心共识</h4>
-                    <p style="margin:0;color:#555;line-height:1.7;">${escapeHtml(footer.core_consensus)}</p>
-                </div>`;
-            }
             if (footer.contacts && footer.contacts.length) {
                 html += `<div class="visual-footer-block"><h4>联系人</h4><ul class="visual-card-bullets">
                     ${footer.contacts.map(c => `<li>${escapeHtml(c)}</li>`).join('')}</ul></div>`;
