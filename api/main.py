@@ -17,6 +17,7 @@ logger = setup_logging(
 from api.routes.meeting import router as meeting_router
 from api.routes.websocket import router as websocket_router
 from api.routes.auth import router as auth_router
+from api.routes.admin import router as admin_router
 from api.routes.export import router as export_router
 
 app = FastAPI(
@@ -50,6 +51,12 @@ app.include_router(
     auth_router,
     prefix="/api",
     tags=["用户认证"]
+)
+
+app.include_router(
+    admin_router,
+    prefix="/api",
+    tags=["超级管理"]
 )
 
 app.include_router(

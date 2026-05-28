@@ -250,23 +250,45 @@ def get_all_meetings(
         return [meeting.to_dict() for meeting in meetings]
 
 
+def _remove_file_if_exists(path: str | None):
+    import os
+    if path and os.path.isfile(path):
+        try:
+            os.remove(path)
+            logger.info(f"已删除文件: {path}")
+        except OSError as e:
+            logger.warning(f"删除文件失败: {path}, {e}")
+
+
 def delete_meeting(file_id: str) -> bool:
-    """
-    删除会议记录
-    
-    Args:
-        file_id: 文件ID
-        
-    Returns:
-        bool: 是否删除成功
-    """
+    """删除会议记录（仅数据库）"""
     with get_db_session() as session:
         meeting = session.query(Meeting).filter(Meeting.file_id == file_id).first()
         if meeting:
             session.delete(meeting)
             logger.info(f"会议记录已删除: file_id={file_id}")
             return True
-        else:
+        logger.warning(f"未找到会议记录: file_id={file_id}")
+        return False
+
+
+def delete_meeting_with_files(file_id: str) -> bool:
+    """删除会议记录及关联磁盘文件"""
+    with get_db_session() as session:
+        meeting = session.query(Meeting).filter(Meeting.file_id == file_id).first()
+        if not meeting:
             logger.warning(f"未找到会议记录: file_id={file_id}")
             return False
+        paths = [
+            meeting.audio_file_path,
+            meeting.transcript_file_path,
+            meeting.summary_file_path,
+        ]
+        session.delete(meeting)
+        session.flush()
+
+    for path in paths:
+        _remove_file_if_exists(path)
+    logger.info(f"会议记录及文件已删除: file_id={file_id}")
+    return True
 

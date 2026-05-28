@@ -546,6 +546,137 @@
         .request-status-pending { color: #f39c12; font-weight: bold; }
         .request-status-approved { color: #27ae60; font-weight: bold; }
         .request-status-rejected { color: #e74c3c; font-weight: bold; }
+
+        .admin-modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.45);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 8000;
+            padding: 20px;
+        }
+
+        .admin-modal-overlay.active { display: flex; }
+
+        .admin-modal-box {
+            background: white;
+            border-radius: 16px;
+            width: 100%;
+            max-width: 720px;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+        }
+
+        .admin-modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 24px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .admin-modal-header h3 {
+            margin: 0;
+            color: #333;
+            font-size: 18px;
+        }
+
+        .admin-modal-close {
+            background: none;
+            border: none;
+            font-size: 28px;
+            line-height: 1;
+            color: #999;
+            cursor: pointer;
+            padding: 0 4px;
+        }
+
+        .admin-modal-close:hover { color: #333; }
+
+        .admin-modal-body {
+            padding: 20px 24px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .admin-modal-hint {
+            color: #999;
+            font-size: 13px;
+            margin-bottom: 16px;
+            line-height: 1.6;
+        }
+
+        .admin-user-row {
+            border: 1px solid #e8e8e8;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 14px;
+            background: #fafafa;
+        }
+
+        .admin-user-row-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .admin-user-meta {
+            color: #666;
+            font-size: 13px;
+            margin-top: 6px;
+            line-height: 1.6;
+        }
+
+        .admin-user-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+            align-items: center;
+        }
+
+        .admin-user-actions select {
+            padding: 8px 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 13px;
+            min-width: 180px;
+            background: white;
+        }
+
+        .admin-perm-panel {
+            margin-top: 14px;
+            padding: 14px;
+            background: white;
+            border-radius: 10px;
+            border: 1px solid #e8e8e8;
+        }
+
+        .admin-perm-panel .auth-field { margin-bottom: 12px; }
+        .admin-perm-panel .auth-field:last-of-type { margin-bottom: 0; }
+
+        .admin-perm-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .btn-sm {
+            padding: 8px 14px;
+            font-size: 13px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        .btn-sm.btn-primary { background: #667eea; color: white; }
+        .btn-sm.btn-primary:hover { background: #5568d3; }
     </style>
 </head>
 <body>
@@ -784,8 +915,28 @@
                 <h3 style="color: #333; margin-bottom: 15px;">待审批申请</h3>
                 <div id="pendingRequestsList"><p style="color:#999;">暂无待审批</p></div>
             </div>
+
+            <div id="rootAdminSection" style="display:none; margin-top: 25px;">
+                <button type="button" class="btn-primary" onclick="openAdminModal()" style="padding: 12px 24px;">
+                    👥 用户管理
+                </button>
+            </div>
         </div>
     </div>
+    </div>
+
+    <!-- 超级管理员：用户管理二级弹窗 -->
+    <div id="adminModalOverlay" class="admin-modal-overlay" onclick="if(event.target===this) closeAdminModal()">
+        <div class="admin-modal-box" onclick="event.stopPropagation()">
+            <div class="admin-modal-header">
+                <h3>👥 用户管理</h3>
+                <button type="button" class="admin-modal-close" onclick="closeAdminModal()" title="关闭">&times;</button>
+            </div>
+            <div class="admin-modal-body">
+                <p class="admin-modal-hint">可重置密码、调整查阅会议权限与账号权限、删除账号。不可修改或删除超级管理员账号。</p>
+                <div id="adminUsersList"><p style="color:#999;">加载中...</p></div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -794,6 +945,7 @@
         let currentUser = null;
 
         const ROLE_LABELS = { root: '超级管理员', admin: '管理员', user: '普通用户' };
+        let adminUsersCache = [];
 
         function switchAuthTab(tab) {
             document.getElementById('loginTabBtn').classList.toggle('active', tab === 'login');
@@ -963,6 +1115,38 @@
             if (currentUser.role === 'admin' || currentUser.role === 'root') {
                 loadPendingRequests();
             }
+
+            document.getElementById('rootAdminSection').style.display =
+                currentUser.role === 'root' ? 'block' : 'none';
+        }
+
+        function openAdminModal() {
+            document.getElementById('adminModalOverlay').classList.add('active');
+            loadAdminUsers();
+        }
+
+        function closeAdminModal() {
+            document.getElementById('adminModalOverlay').classList.remove('active');
+        }
+
+        function hideAdminPermPanels(userId) {
+            const meeting = document.getElementById('adminPermMeeting_' + userId);
+            const account = document.getElementById('adminPermAccount_' + userId);
+            const pwd = document.getElementById('adminResetPwd_' + userId);
+            if (meeting) meeting.style.display = 'none';
+            if (account) account.style.display = 'none';
+            if (pwd) pwd.style.display = 'none';
+        }
+
+        function onAdminPermActionChange(userId, action) {
+            hideAdminPermPanels(userId);
+            if (action === 'meeting') {
+                document.getElementById('adminPermMeeting_' + userId).style.display = 'block';
+            } else if (action === 'account') {
+                document.getElementById('adminPermAccount_' + userId).style.display = 'block';
+            } else if (action === 'password') {
+                document.getElementById('adminResetPwd_' + userId).style.display = 'block';
+            }
         }
 
         async function submitPermissionRequest() {
@@ -1039,6 +1223,241 @@
             } catch (e) {
                 el.innerHTML = '<p style="color:#f44336;">加载失败</p>';
             }
+        }
+
+        function escapeHtml(s) {
+            const d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        function escapeAttr(s) {
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;')
+                .replace(/</g, '&lt;');
+        }
+
+        function buildMeetingPermPanel(u) {
+            if (u.role === 'user') {
+                return `
+                    <div class="auth-field">
+                        <label>查阅会议权限</label>
+                        <select id="adminCanViewAll_${u.id}">
+                            <option value="0" ${!u.can_view_all ? 'selected' : ''}>仅查看自己的会议</option>
+                            <option value="1" ${u.can_view_all ? 'selected' : ''}>可查看全部会议</option>
+                        </select>
+                    </div>`;
+            }
+            if (u.role === 'admin') {
+                return `
+                    <div class="auth-field">
+                        <label>查阅会议权限</label>
+                        <select id="adminCanViewRoot_${u.id}">
+                            <option value="0" ${!u.can_view_root_meetings ? 'selected' : ''}>不可查看超级管理员会议</option>
+                            <option value="1" ${u.can_view_root_meetings ? 'selected' : ''}>可查看超级管理员会议（限最近3天）</option>
+                        </select>
+                    </div>
+                    <p style="color:#999;font-size:12px;margin:0;">管理员默认可查看其他普通用户的会议。</p>`;
+            }
+            return '<p style="color:#999;margin:0;">该角色无需设置查阅会议权限。</p>';
+        }
+
+        function renderAdminUserRow(u) {
+            const roleLabel = ROLE_LABELS[u.role] || u.role;
+            const isRoot = u.role === 'root';
+            const isSelf = currentUser && u.id === currentUser.id;
+            let permInfo = '';
+            if (u.role === 'admin') {
+                permInfo = `查阅：可查看其他用户会议；超级管理员会议 ${u.can_view_root_meetings ? '可查看（限3天）' : '不可查看'}`;
+            } else if (u.role === 'user') {
+                permInfo = `查阅：${u.can_view_all ? '可查看全部会议' : '仅自己的会议'}`;
+            }
+
+            if (isRoot) {
+                return `<div class="admin-user-row">
+                    <div class="admin-user-row-header">
+                        <div>
+                            <strong>${escapeHtml(u.nickname || u.username)}</strong>
+                            <span class="role-${u.role}" style="padding:2px 8px;border-radius:4px;font-size:12px;color:#fff;margin-left:6px;">${roleLabel}</span>
+                            <div class="admin-user-meta">${escapeHtml(u.username)}${isSelf ? ' · 当前登录' : ''}</div>
+                        </div>
+                    </div>
+                </div>`;
+            }
+
+            return `<div class="admin-user-row">
+                <div class="admin-user-row-header">
+                    <div>
+                        <strong>${escapeHtml(u.nickname || u.username)}</strong>
+                        <span class="role-${u.role}" style="padding:2px 8px;border-radius:4px;font-size:12px;color:#fff;margin-left:6px;">${roleLabel}</span>
+                        <div class="admin-user-meta">
+                            ${escapeHtml(u.username)} · 注册 ${new Date(u.created_at).toLocaleString('zh-CN')}
+                            ${permInfo ? '<br>' + permInfo : ''}
+                        </div>
+                    </div>
+                </div>
+                <div class="admin-user-actions">
+                    <select onchange="onAdminPermActionChange(${u.id}, this.value); this.value='';">
+                        <option value="">选择操作…</option>
+                        <option value="meeting">修改查阅会议权限</option>
+                        <option value="account">修改用户账号权限</option>
+                        <option value="password">重置密码</option>
+                    </select>
+                    ${!isSelf ? `<button type="button" class="btn-sm btn-danger" onclick="adminDeleteUser(${u.id}, '${escapeAttr(u.username)}')">删除账号</button>` : ''}
+                </div>
+                <div id="adminPermMeeting_${u.id}" class="admin-perm-panel" style="display:none;">
+                    <div style="font-weight:bold;color:#667eea;margin-bottom:10px;font-size:14px;">修改查阅会议权限</div>
+                    ${buildMeetingPermPanel(u)}
+                    <div class="admin-perm-actions">
+                        <button type="button" class="btn-sm btn-primary" onclick="saveAdminMeetingPerm(${u.id})">保存</button>
+                        <button type="button" class="btn-sm" style="background:#eee;color:#666;" onclick="hideAdminPermPanels(${u.id})">取消</button>
+                    </div>
+                </div>
+                <div id="adminPermAccount_${u.id}" class="admin-perm-panel" style="display:none;">
+                    <div style="font-weight:bold;color:#667eea;margin-bottom:10px;font-size:14px;">修改用户账号权限</div>
+                    <div class="auth-field">
+                        <label>昵称</label>
+                        <input type="text" id="adminNickname_${u.id}" value="${escapeAttr(u.nickname || u.username || '')}">
+                    </div>
+                    <div class="auth-field">
+                        <label>账号角色</label>
+                        <select id="adminRole_${u.id}">
+                            <option value="user" ${u.role === 'user' ? 'selected' : ''}>普通用户</option>
+                            <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>管理员</option>
+                        </select>
+                    </div>
+                    <p style="color:#999;font-size:12px;margin:0;">设为管理员后自动获得查看其他用户会议权限。</p>
+                    <div class="admin-perm-actions">
+                        <button type="button" class="btn-sm btn-primary" onclick="saveAdminAccountPerm(${u.id})">保存</button>
+                        <button type="button" class="btn-sm" style="background:#eee;color:#666;" onclick="hideAdminPermPanels(${u.id})">取消</button>
+                    </div>
+                </div>
+                <div id="adminResetPwd_${u.id}" class="admin-perm-panel" style="display:none;">
+                    <div style="font-weight:bold;color:#667eea;margin-bottom:10px;font-size:14px;">重置密码 · ${escapeHtml(u.username)}</div>
+                    <div class="auth-field">
+                        <label>新密码</label>
+                        <input type="password" id="adminNewPwd_${u.id}" placeholder="至少 6 位">
+                    </div>
+                    <div class="auth-field">
+                        <label>确认新密码</label>
+                        <input type="password" id="adminNewPwd2_${u.id}" placeholder="再次输入">
+                    </div>
+                    <div class="admin-perm-actions">
+                        <button type="button" class="btn-sm btn-primary" onclick="saveAdminResetPassword(${u.id})">确认重置</button>
+                        <button type="button" class="btn-sm" style="background:#eee;color:#666;" onclick="hideAdminPermPanels(${u.id})">取消</button>
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        async function loadAdminUsers() {
+            const el = document.getElementById('adminUsersList');
+            el.innerHTML = '<p style="color:#999;">加载中...</p>';
+            try {
+                const resp = await authFetch('/api/admin/users');
+                const data = await resp.json();
+                if (!resp.ok) {
+                    el.innerHTML = '<p style="color:#f44336;">' + escapeHtml(data.detail || '加载失败') + '</p>';
+                    return;
+                }
+                adminUsersCache = data.users || [];
+                if (adminUsersCache.length === 0) {
+                    el.innerHTML = '<p style="color:#999;">暂无用户</p>';
+                    return;
+                }
+                el.innerHTML = adminUsersCache.map(renderAdminUserRow).join('');
+            } catch (e) {
+                el.innerHTML = '<p style="color:#f44336;">加载失败</p>';
+            }
+        }
+
+        async function saveAdminMeetingPerm(userId) {
+            const user = adminUsersCache.find(u => u.id === userId);
+            if (!user) return;
+            const body = {};
+            if (user.role === 'user') {
+                const el = document.getElementById('adminCanViewAll_' + userId);
+                body.can_view_all = el && el.value === '1';
+            } else if (user.role === 'admin') {
+                const el = document.getElementById('adminCanViewRoot_' + userId);
+                body.can_view_root_meetings = el && el.value === '1';
+            } else {
+                alert('该用户无需设置查阅会议权限');
+                return;
+            }
+            try {
+                const resp = await authFetch(`/api/admin/users/${userId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await resp.json();
+                if (!resp.ok) { alert(data.detail || '保存失败'); return; }
+                alert('查阅会议权限已更新');
+                loadAdminUsers();
+            } catch (e) { alert(e.message); }
+        }
+
+        async function saveAdminAccountPerm(userId) {
+            const nicknameEl = document.getElementById('adminNickname_' + userId);
+            const roleEl = document.getElementById('adminRole_' + userId);
+            const nickname = nicknameEl.value.trim();
+            if (!nickname) { alert('昵称不能为空'); return; }
+            const role = roleEl.value;
+            try {
+                const resp = await authFetch(`/api/admin/users/${userId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ nickname, role })
+                });
+                const data = await resp.json();
+                if (!resp.ok) { alert(data.detail || '保存失败'); return; }
+                alert('账号权限已更新');
+                loadAdminUsers();
+            } catch (e) { alert(e.message); }
+        }
+
+        async function saveAdminResetPassword(userId) {
+            const pwd = document.getElementById('adminNewPwd_' + userId).value;
+            const pwd2 = document.getElementById('adminNewPwd2_' + userId).value;
+            if (!pwd || pwd.length < 6) { alert('密码至少 6 位'); return; }
+            if (pwd !== pwd2) { alert('两次密码不一致'); return; }
+            try {
+                const resp = await authFetch(`/api/admin/users/${userId}/reset-password`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ new_password: pwd })
+                });
+                const data = await resp.json();
+                if (!resp.ok) { alert(data.detail || '操作失败'); return; }
+                alert(data.message || '密码已重置');
+                hideAdminPermPanels(userId);
+            } catch (e) { alert(e.message); }
+        }
+
+        async function adminDeleteUser(userId, username) {
+            if (!confirm(`确定删除用户「${username}」？其会议记录将保留但不再关联该用户。`)) return;
+            try {
+                const resp = await authFetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
+                const data = await resp.json();
+                if (!resp.ok) { alert(data.detail || '删除失败'); return; }
+                alert(data.message || '已删除');
+                loadAdminUsers();
+            } catch (e) { alert(e.message); }
+        }
+
+        async function adminDeleteMeeting(fileId, displayName) {
+            const name = displayName || fileId;
+            if (!confirm(`确定删除会议「${name}」？此操作不可恢复。`)) return;
+            try {
+                const resp = await authFetch(`/api/admin/meetings/${fileId}`, { method: 'DELETE' });
+                const data = await resp.json();
+                if (!resp.ok) { alert(data.detail || '删除失败'); return; }
+                alert(data.message || '已删除');
+                loadHistory();
+            } catch (e) { alert(e.message); }
         }
 
         async function reviewRequest(id, action) {
@@ -1765,11 +2184,16 @@
                 
                 if (data.success && data.meetings.length > 0) {
                     let html = '';
+                    const isRoot = currentUser && currentUser.role === 'root';
                     data.meetings.forEach(meeting => {
                         const date = new Date(meeting.created_at).toLocaleString('zh-CN');
                         
                         // 显示会议名称
                         let displayName = meeting.meeting_name || meeting.original_filename || '未命名会议';
+                        const safeName = displayName.replace(/'/g, "\\'");
+                        const deleteBtn = isRoot ? `
+                            <button class="btn-danger" style="padding:4px 10px;font-size:12px;margin-left:8px;"
+                                onclick="event.stopPropagation(); adminDeleteMeeting('${meeting.file_id}', '${safeName}')">删除</button>` : '';
                         
                         html += `
                             <div style="border: 1px solid #e0e0e0; border-radius: 10px; padding: 15px; margin-bottom: 15px; cursor: pointer; transition: all 0.3s;" 
@@ -1778,7 +2202,7 @@
                                  onclick="showMeetingDetail('${meeting.file_id}')">
                                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                                     <strong style="color: #667eea; font-size: 16px;">${displayName}</strong>
-                                    <span style="color: #999; font-size: 12px;">${date}</span>
+                                    <span style="color: #999; font-size: 12px;">${date}${deleteBtn}</span>
                                 </div>
                                 <div style="color: #666; font-size: 14px; margin-bottom: 8px;">
                                     ${meeting.transcript_length ? `文本长度: ${meeting.transcript_length} 字符 | ` : ''}
@@ -1810,8 +2234,14 @@
                 const data = await response.json();
                 
                 if (data.success) {
+                    const isRoot = currentUser && currentUser.role === 'root';
+                    const deleteBtn = isRoot ? `
+                        <button class="btn-danger" style="margin-left:10px;" onclick="adminDeleteMeeting('${fileId}', '该会议')">删除会议</button>` : '';
                     let html = `
-                        <button onclick="loadHistory()" class="btn-primary" style="margin-bottom: 20px; background: #666;">← 返回列表</button>
+                        <div style="margin-bottom: 20px;">
+                            <button onclick="loadHistory()" class="btn-primary" style="background: #666;">← 返回列表</button>
+                            ${deleteBtn}
+                        </div>
                         
                         <div style="margin-bottom: 30px;">
                             <h3 style="color: #667eea; margin-bottom: 15px;">📝 转写文本</h3>
