@@ -1,5 +1,7 @@
 """AI 总结导出 API"""
+import json
 import os
+from typing import Any
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,6 +13,11 @@ from config.config import output_dir
 from db.models import User
 from db.session import check_meeting_access, get_meeting_by_file_id
 from utils.docx_export import build_export_filename, markdown_to_docx
+from utils.visual_export import (
+    build_visual_export_filename,
+    visual_summary_to_html,
+    visual_summary_to_json_bytes,
+)
 from utils.logger import get_logger
 
 router = APIRouter()
@@ -19,6 +26,11 @@ logger = get_logger("export_route")
 
 class SummaryExportRequest(BaseModel):
     content: str = Field(..., min_length=1)
+    title: str = Field(default="AI 智能速览", max_length=100)
+
+
+class VisualExportRequest(BaseModel):
+    visual: dict[str, Any] = Field(...)
     title: str = Field(default="AI 智能速览", max_length=100)
 
 
@@ -62,6 +74,60 @@ def _load_summary_for_meeting(file_id: str) -> tuple[str, str]:
     return summary, title
 
 
+def _load_visual_for_meeting(file_id: str) -> tuple[dict, str]:
+    meeting = get_meeting_by_file_id(file_id)
+    title = "AI 智能速览"
+    visual = None
+
+    if meeting:
+        if meeting.meeting_name:
+            title = meeting.meeting_name
+        if meeting.summary_visual:
+            try:
+                visual = json.loads(meeting.summary_visual)
+            except json.JSONDecodeError:
+                pass
+
+    if visual is None:
+        summaries_dir = os.path.join(output_dir, "summaries")
+        if os.path.isdir(summaries_dir):
+            for name in os.listdir(summaries_dir):
+                if file_id in name and name.endswith('_visual.json'):
+                    path = os.path.join(summaries_dir, name)
+                    with open(path, 'r', encoding='utf-8') as f:
+                        visual = json.load(f)
+                    break
+
+    if not visual:
+        raise HTTPException(status_code=404, detail='该会议暂无图文速览')
+
+    return visual, title
+
+
+def _html_attachment_response(html: str, title: str, file_id: str | None = None) -> Response:
+    filename = build_visual_export_filename(title, file_id, ext='html')
+    encoded = quote(filename)
+    return Response(
+        content=html.encode('utf-8'),
+        media_type='text/html; charset=utf-8',
+        headers={
+            'Content-Disposition': f'attachment; filename="{encoded}"; filename*=UTF-8\'\'{encoded}',
+        },
+    )
+
+
+def _json_attachment_response(visual: dict, title: str, file_id: str | None = None) -> Response:
+    filename = build_visual_export_filename(title, file_id, ext='json')
+    encoded = quote(filename)
+    return Response(
+        content=visual_summary_to_json_bytes(visual),
+        media_type='application/json; charset=utf-8',
+        headers={
+            'Content-Disposition': f'attachment; filename="{encoded}"; filename*=UTF-8\'\'{encoded}',
+        },
+    )
+
+
 @router.get("/meetings/{file_id}/export/summary")
 async def export_meeting_summary_docx(
     file_id: str,
@@ -87,3 +153,41 @@ async def export_summary_content_docx(
     """根据总结正文直接导出 Word（用于刚生成尚未跳转历史的场景）"""
     logger.info(f"导出 AI 总结内容: user={current_user.username}, title={body.title}")
     return _docx_response(body.content.strip(), body.title.strip() or "AI 智能速览")
+
+
+@router.get("/meetings/{file_id}/export/visual")
+async def export_meeting_visual(
+    file_id: str,
+    format: str = 'html',
+    current_user: User = Depends(get_current_user),
+):
+    """导出指定会议的图文速览（html 或 json）"""
+    exists, allowed = check_meeting_access(file_id, current_user)
+    if not exists:
+        raise HTTPException(status_code=404, detail='会议不存在')
+    if not allowed:
+        raise HTTPException(status_code=403, detail='无权导出该会议')
+
+    visual, title = _load_visual_for_meeting(file_id)
+    fmt = (format or 'html').lower()
+    logger.info(f"导出图文速览: file_id={file_id}, format={fmt}, user={current_user.username}")
+
+    if fmt == 'json':
+        return _json_attachment_response(visual, title, file_id)
+    return _html_attachment_response(visual_summary_to_html(visual, title), title, file_id)
+
+
+@router.post("/export/visual")
+async def export_visual_content(
+    body: VisualExportRequest,
+    format: str = 'html',
+    current_user: User = Depends(get_current_user),
+):
+    """根据图文 JSON 直接导出（用于刚生成尚未入库的场景）"""
+    title = body.title.strip() or 'AI 智能速览'
+    fmt = (format or 'html').lower()
+    logger.info(f"导出图文速览内容: user={current_user.username}, title={title}, format={fmt}")
+
+    if fmt == 'json':
+        return _json_attachment_response(body.visual, title)
+    return _html_attachment_response(visual_summary_to_html(body.visual, title), title)

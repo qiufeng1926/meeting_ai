@@ -19,6 +19,7 @@ class User(Base):
     role = Column(String(20), nullable=False, default='user', comment='角色: user-普通用户, admin-管理员, root-超级管理员')
     can_view_all = Column(Boolean, nullable=False, default=False, comment='是否可查看所有会议')
     can_view_root_meetings = Column(Boolean, nullable=False, default=False, comment='管理员是否可查看超级管理员会议(限3天)')
+    can_view_all_roots = Column(Boolean, nullable=False, default=False, comment='超级管理员是否可查看其他超级管理员的会议')
     created_at = Column(DateTime, nullable=False, default=datetime.now, comment='创建时间')
     updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
@@ -33,6 +34,7 @@ class User(Base):
             'role': self.role,
             'can_view_all': self.can_view_all or self.role in ('admin', 'root'),
             'can_view_root_meetings': self.can_view_root_meetings,
+            'can_view_all_roots': self.can_view_all_roots,
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
         if include_sensitive:
@@ -47,6 +49,10 @@ class User(Base):
 
     def is_root(self) -> bool:
         return self.role == 'root'
+
+    def can_view_peer_root_meetings(self) -> bool:
+        """是否可查看其他超级管理员的会议（默认超级管理员之间互不可见）"""
+        return self.is_root() and self.can_view_all_roots
 
 
 class PermissionRequest(Base):
@@ -108,7 +114,11 @@ class Meeting(Base):
     
     # 内容数据
     transcript = Column(Text, nullable=False, comment='转写文本内容')
-    summary = Column(Text, nullable=True, comment='会议纪要内容')
+    summary = Column(Text, nullable=True, comment='会议纪要内容(Markdown速览)')
+    summary_visual = Column(Text, nullable=True, comment='图文速览JSON')
+    summary_visual_status = Column(
+        String(20), nullable=True, comment='图文状态: completed/failed/skipped'
+    )
     
     # 数据统计
     transcript_length = Column(Integer, nullable=False, default=0, comment='转写文本长度')
@@ -164,6 +174,8 @@ class Meeting(Base):
             'status': self.status,
             'error_message': self.error_message,
             'has_summary': bool(self.summary),
+            'has_visual_summary': bool(self.summary_visual),
+            'summary_visual_status': self.summary_visual_status,
             'preview': (self.transcript or '')[:200],
         }
 
@@ -209,6 +221,36 @@ def migrate_schema(engine):
             ))
             conn.commit()
             print("[OK] users 表已添加 can_view_root_meetings 字段")
+
+        result = conn.execute(text("""
+            SELECT COUNT(*) FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'can_view_all_roots'
+        """))
+        if result.scalar() == 0:
+            conn.execute(text(
+                "ALTER TABLE users ADD COLUMN can_view_all_roots TINYINT(1) NOT NULL "
+                "DEFAULT 0 COMMENT '超级管理员是否可查看其他超级管理员的会议'"
+            ))
+            conn.commit()
+            print("[OK] users 表已添加 can_view_all_roots 字段")
+            conn.execute(text(
+                "UPDATE users SET can_view_all_roots = 1 WHERE username = 'qiufengai' AND role = 'root'"
+            ))
+            conn.commit()
+
+        for col, col_def in (
+            ('summary_visual', "TEXT NULL COMMENT '图文速览JSON'"),
+            ('summary_visual_status', "VARCHAR(20) NULL COMMENT '图文状态'"),
+        ):
+            result = conn.execute(text(f"""
+                SELECT COUNT(*) FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'meetings'
+                AND COLUMN_NAME = '{col}'
+            """))
+            if result.scalar() == 0:
+                conn.execute(text(f"ALTER TABLE meetings ADD COLUMN {col} {col_def}"))
+                conn.commit()
+                print(f"[OK] meetings 表已添加 {col} 字段")
 
 
 def init_database(database_url: str):

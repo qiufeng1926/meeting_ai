@@ -53,7 +53,7 @@ def _user_response(user: User, token: str | None = None) -> dict:
 def register(body: RegisterRequest, db: Session = Depends(get_db)):
     username = body.username.strip()
     nickname = body.nickname.strip()
-    if username in ('root', 'admin'):
+    if username in ('root', 'admin', 'qiufengai'):
         raise HTTPException(status_code=400, detail='该用户名不可注册')
     if not nickname:
         raise HTTPException(status_code=400, detail='昵称不能为空')
@@ -183,6 +183,31 @@ def list_pending_requests(
     return {'success': True, 'requests': [r.to_dict() for r in requests]}
 
 
+@router.get('/auth/requests/review-history')
+def list_admin_review_history(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    limit: int = 100,
+):
+    """超级管理员查看管理员已处理的审批记录（查看全部会议等）"""
+    if not current_user.is_root():
+        raise HTTPException(status_code=403, detail='仅超级管理员可查看审批记录')
+
+    requests = (
+        db.query(PermissionRequest)
+        .join(User, PermissionRequest.user_id == User.id)
+        .filter(
+            PermissionRequest.request_type == 'view_all',
+            PermissionRequest.status.in_(('approved', 'rejected')),
+            PermissionRequest.reviewer_id.isnot(None),
+        )
+        .order_by(PermissionRequest.reviewed_at.desc())
+        .limit(min(limit, 200))
+        .all()
+    )
+    return {'success': True, 'requests': [r.to_dict() for r in requests]}
+
+
 @router.post('/auth/requests/{request_id}/review')
 def review_request(
     request_id: int,
@@ -244,4 +269,4 @@ def seed_users(db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail='用户已存在，无需初始化')
     seed_default_users(db)
     db.commit()
-    return {'success': True, 'message': '默认账号已创建: root/root2026, admin/123456'}
+    return {'success': True, 'message': '默认账号已创建: root/root2026, qiufengai/qfai12@@, admin/123456'}

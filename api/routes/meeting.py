@@ -19,6 +19,7 @@ from db.models import User
 from config.config import upload_dir, output_dir
 from asr.engine import FunASREngine
 from llm.glm_chat import GLMClient
+from llm.summary_service import generate_dual_summaries, visual_dict_from_result
 from utils.logger import get_logger
 from db.session import save_meeting_to_db
 
@@ -99,23 +100,35 @@ async def upload_meeting_audio(
         await _save_text_async(transcript_path, transcript)
         logger.info(f"转写文本已保存", extra={'request_id': request_id, 'output_params': {'transcript_file': transcript_path}})
 
-        # 异步 AI 总结会议纪要
-        logger.info(f"开始生成会议纪要...", extra={'request_id': request_id})
+        # 并行生成 Markdown 速览 + 图文 JSON
+        logger.info(f"开始生成会议纪要（双轨）...", extra={'request_id': request_id})
         llm_start = time.time()
-        summary = await glm.summary_meeting_async(transcript)
+        dual = await generate_dual_summaries(glm, transcript, meeting_name)
         llm_duration = (time.time() - llm_start) * 1000
+
+        if dual.markdown_error or not dual.markdown:
+            raise RuntimeError(dual.markdown_error or 'Markdown 速览生成失败')
+
+        summary = dual.markdown
+        summary_visual_dict = visual_dict_from_result(dual)
         logger.info(f"会议纪要生成完成", extra={
             'request_id': request_id,
             'output_params': {
                 'summary_length': len(summary),
-                'llm_duration_ms': round(llm_duration, 2)
-            }
+                'visual_status': dual.visual_status,
+                'llm_duration_ms': round(llm_duration, 2),
+            },
         })
 
-        # 异步保存会议纪要
         summary_path = os.path.join(output_dir, "summaries", f"{name_prefix}{file_id}_{timestamp}.md")
         await _save_text_async(summary_path, summary)
-        logger.info(f"会议纪要已保存", extra={'request_id': request_id, 'output_params': {'summary_file': summary_path}})
+        visual_path = os.path.join(output_dir, "summaries", f"{name_prefix}{file_id}_{timestamp}_visual.json")
+        if dual.visual_json:
+            await _save_text_async(visual_path, dual.visual_json)
+        logger.info(f"会议纪要已保存", extra={
+            'request_id': request_id,
+            'output_params': {'summary_file': summary_path, 'visual_file': visual_path},
+        })
 
         # 计算总耗时
         total_duration_ms = (time.time() - start_time) * 1000
@@ -133,6 +146,8 @@ async def upload_meeting_audio(
                 'summary_file_path': summary_path,
                 'transcript': transcript,
                 'summary': summary,
+                'summary_visual': dual.visual_json,
+                'summary_visual_status': dual.visual_status,
                 'transcript_length': len(transcript),
                 'summary_length': len(summary),
                 'asr_duration_ms': round(asr_duration, 2),
@@ -166,8 +181,10 @@ async def upload_meeting_audio(
             "file_id": file_id,
             "transcript": transcript,
             "summary": summary,
+            "summary_visual": summary_visual_dict,
+            "summary_visual_status": dual.visual_status,
             "transcript_file": transcript_path,
-            "summary_file": summary_path
+            "summary_file": summary_path,
         }
         
     except Exception as e:
