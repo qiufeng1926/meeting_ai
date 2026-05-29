@@ -1,9 +1,13 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from utils.logger import setup_logging
+from utils.startup import validate_startup_config
+from config.config import app_env, cors_origins
 
 import os
 
@@ -20,25 +24,46 @@ from api.routes.auth import router as auth_router
 from api.routes.admin import router as admin_router
 from api.routes.export import router as export_router
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    validate_startup_config()
+    logger.info("Meeting AI 配置校验通过", extra={"output_params": {"app_env": app_env}})
+    yield
+
+
 app = FastAPI(
     title="Meeting AI",
     version="1.0.0",
-    description="会议 AI 助手 - 支持批量和实时语音转文本"
+    description="会议 AI 助手 - 支持批量和实时语音转文本",
+    lifespan=lifespan,
 )
 
 logger.info("Meeting AI 服务启动")
 
 
-# CORS 跨域配置
+def _parse_cors_origins() -> list[str]:
+    origins = [o.strip() for o in cors_origins.split(",") if o.strip()]
+    if origins:
+        return origins
+    if app_env == "development":
+        return ["http://localhost:8000", "http://127.0.0.1:8000"]
+    return []
+
+
+_cors_allow_origins = _parse_cors_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 允许所有域名
+    allow_origins=_cors_allow_origins,
     allow_credentials=True,
-    allow_methods=["*"],  # 允许所有请求方法
-    allow_headers=["*"],  # 允许所有请求头
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-logger.info("CORS 跨域已开启")
+logger.info(
+    "CORS 已配置",
+    extra={"output_params": {"origins": _cors_allow_origins, "app_env": app_env}},
+)
 
 # 注册路由
 app.include_router(

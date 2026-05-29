@@ -74,10 +74,13 @@ def test_get_all_meetings():
     print("\n=== 测试3: 获取所有会议记录 ===")
     
     try:
-        meetings = get_all_meetings(limit=10)
-        print(f"✓ 查询成功，共 {len(meetings)} 条记录")
+        meetings, total = get_all_meetings(limit=10)
+        print(f"✓ 查询成功，共 {total} 条记录，当前页 {len(meetings)} 条")
         for i, meeting in enumerate(meetings, 1):
-            print(f"  {i}. {meeting.meeting_name} ({meeting.meeting_type}) - {meeting.status}")
+            print(
+                f"  {i}. {meeting.get('meeting_name')} "
+                f"({meeting.get('meeting_type')}) - {meeting.get('status')}"
+            )
         return True
     except Exception as e:
         print(f"✗ 查询失败: {str(e)}")

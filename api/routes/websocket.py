@@ -201,24 +201,30 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
             extra={"request_id": connection_id},
         )
         while True:
-            # 接收客户端消息（前端使用 JSON 文本帧，非二进制）
+            # 控制消息：JSON 文本帧；音频：二进制 PCM 帧（16kHz int16）
             raw_message = await websocket.receive()
             if raw_message.get("type") == "websocket.disconnect":
                 raise WebSocketDisconnect()
 
-            if "text" in raw_message:
-                data = raw_message["text"].encode("utf-8")
-            elif "bytes" in raw_message:
-                data = raw_message["bytes"]
-            else:
+            if "bytes" in raw_message:
+                audio_bytes = raw_message["bytes"]
+                if not audio_bytes:
+                    continue
+                if session_info.get("tingwu_failed"):
+                    continue
+                await ensure_tingwu_started()
+                session_info["audio_chunks"] += 1
+                await tingwu_engine.feed_stream_async(
+                    session_info["transcriber"], audio_bytes, 16000
+                )
+                session_info["total_text"] = session_info["transcriber"].total_text
                 continue
 
-            if len(data) < 1:
+            if "text" not in raw_message:
                 continue
-            
+
             try:
-                # 尝试解析 JSON 元数据 + 音频数据
-                message = json.loads(data.decode('utf-8', errors='ignore'))
+                message = json.loads(raw_message["text"])
                 
                 # 处理初始化消息（会议名称）
                 if message.get("type") == "init":
@@ -232,6 +238,7 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
                     await ensure_tingwu_started()
                     continue
 
+                # 兼容旧版 JSON 音频帧（建议客户端改用二进制 PCM）
                 if message.get("type") == "audio":
                     if session_info.get("tingwu_failed"):
                         continue
@@ -239,7 +246,6 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
                     audio_bytes = bytes(message.get("data", []))
                     sample_rate = message.get("sample_rate", 16000)
                     session_info["audio_chunks"] += 1
-
                     await tingwu_engine.feed_stream_async(
                         session_info["transcriber"], audio_bytes, sample_rate
                     )
@@ -431,20 +437,11 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
 
                     break
                     
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                # 原始 PCM 二进制帧
-                try:
-                    await ensure_tingwu_started()
-                    await tingwu_engine.feed_stream_async(
-                        session_info["transcriber"], data, 16000
-                    )
-                    session_info["total_text"] = session_info["transcriber"].total_text
-                except Exception as e:
-                    logger.error(f"处理音频数据失败: {e}")
-                    await manager.send_json(connection_id, {
-                        "type": "error",
-                        "message": f"处理失败: {str(e)}",
-                    })
+            except json.JSONDecodeError:
+                logger.warning(
+                    "无法解析 WebSocket 文本消息",
+                    extra={"request_id": connection_id},
+                )
     
     except WebSocketDisconnect:
         duration_ms = (time.time() - start_time) * 1000
@@ -518,26 +515,34 @@ async def list_meetings(
     try:
         from db.session import get_all_meetings
         
-        meetings = get_all_meetings(
+        meetings, total = get_all_meetings(
             limit=limit,
             offset=offset,
             start_date=start_date,
             end_date=end_date,
             viewer=current_user,
         )
-        
+
         duration_ms = (time.time() - start_time) * 1000
         output_params = {
             "success": True,
-            "total": len(meetings),
-            "duration_ms": round(duration_ms, 2)
+            "total": total,
+            "page_count": len(meetings),
+            "duration_ms": round(duration_ms, 2),
         }
-        logger.info(f"获取会议列表成功", extra={'request_id': request_id, 'output_params': output_params, 'duration_ms': duration_ms})
-        
+        logger.info(
+            "获取会议列表成功",
+            extra={
+                "request_id": request_id,
+                "output_params": output_params,
+                "duration_ms": duration_ms,
+            },
+        )
+
         return {
             "success": True,
-            "total": len(meetings),
-            "meetings": meetings
+            "total": total,
+            "meetings": meetings,
         }
         
     except Exception as e:
@@ -568,61 +573,71 @@ async def get_meeting(file_id: str, current_user: User = Depends(get_current_use
         if not allowed:
             return {"success": False, "error": "无权查看该会议"}
 
-        transcripts_dir = os.path.join(output_dir, "transcripts")
-        summaries_dir = os.path.join(output_dir, "summaries")
-        
-        # 查找文件
-        transcript_file = None
-        summary_file = None
-        
-        transcript_file, matched_name = _find_transcript_by_file_id(transcripts_dir, file_id)
-        if transcript_file and matched_name:
-            summary_filename = matched_name.replace('.txt', '.md')
-            summary_path = os.path.join(summaries_dir, summary_filename)
-            if os.path.exists(summary_path):
-                summary_file = summary_path
-        
-        if not transcript_file:
-            duration_ms = (time.time() - start_time) * 1000
-            error_params = {"error": "会议不存在", "duration_ms": round(duration_ms, 2)}
-            logger.warning(f"会议不存在", extra={'request_id': request_id, 'input_params': input_params, 'output_params': error_params, 'duration_ms': duration_ms})
-            return {
-                "success": False,
-                "error": "会议不存在"
-            }
-        
-        # 读取内容
-        with open(transcript_file, 'r', encoding='utf-8') as f:
-            transcript = f.read()
-        
-        summary = None
-        if summary_file:
-            with open(summary_file, 'r', encoding='utf-8') as f:
-                summary = f.read()
-
-        summary_visual = None
-        summary_visual_status = None
-        from db.session import get_meeting_by_file_id
         import json as json_lib
+        from db.session import get_meeting_by_file_id
 
         meeting_record = get_meeting_by_file_id(file_id)
+        transcript = None
+        summary = None
+        summary_visual = None
+        summary_visual_status = None
+        transcript_file = None
+        summary_file = None
+
         if meeting_record:
-            if not summary and meeting_record.summary:
-                summary = meeting_record.summary
+            transcript = meeting_record.transcript
+            summary = meeting_record.summary
             summary_visual_status = meeting_record.summary_visual_status
+            transcript_file = meeting_record.transcript_file_path
+            summary_file = meeting_record.summary_file_path
             if meeting_record.summary_visual:
                 try:
                     summary_visual = json_lib.loads(meeting_record.summary_visual)
                 except json_lib.JSONDecodeError:
                     summary_visual = None
+
+        transcripts_dir = os.path.join(output_dir, "transcripts")
+        summaries_dir = os.path.join(output_dir, "summaries")
+
+        if not transcript:
+            found_path, matched_name = _find_transcript_by_file_id(transcripts_dir, file_id)
+            if found_path:
+                transcript_file = found_path
+                with open(found_path, "r", encoding="utf-8") as f:
+                    transcript = f.read()
+                if matched_name:
+                    summary_path = os.path.join(
+                        summaries_dir, matched_name.replace(".txt", ".md")
+                    )
+                    if os.path.exists(summary_path):
+                        summary_file = summary_path
+
+        if not transcript:
+            duration_ms = (time.time() - start_time) * 1000
+            error_params = {"error": "会议不存在", "duration_ms": round(duration_ms, 2)}
+            logger.warning(
+                "会议不存在",
+                extra={
+                    "request_id": request_id,
+                    "input_params": input_params,
+                    "output_params": error_params,
+                    "duration_ms": duration_ms,
+                },
+            )
+            return {"success": False, "error": "会议不存在"}
+
+        if not summary and summary_file and os.path.exists(summary_file):
+            with open(summary_file, "r", encoding="utf-8") as f:
+                summary = f.read()
+
         if summary_visual is None and summary_file:
-            visual_file = summary_file.replace('.md', '_visual.json')
+            visual_file = summary_file.replace(".md", "_visual.json")
             if os.path.exists(visual_file):
                 try:
-                    with open(visual_file, 'r', encoding='utf-8') as vf:
+                    with open(visual_file, "r", encoding="utf-8") as vf:
                         summary_visual = json_lib.loads(vf.read())
                         if not summary_visual_status:
-                            summary_visual_status = 'completed'
+                            summary_visual_status = "completed"
                 except json_lib.JSONDecodeError:
                     pass
         

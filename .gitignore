@@ -1,7 +1,9 @@
 logs/*
-output/summaries/*
-output/transcripts/*
-upload/*
+output/summaries/*.md
+output/summaries/*.json
+output/transcripts/*.txt
+upload/*.mp3
+upload/*.mp4
 *.pyc
 __pycache__/
 *.db
