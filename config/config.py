@@ -71,9 +71,26 @@ db_charset = _env("DB_CHARSET", "utf8mb4")
 # 构建数据库连接URL
 database_url = f"mysql+pymysql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}?charset={db_charset}"
 
+# 应用环境：development | production
+app_env = (_env("APP_ENV", "development") or "development").strip().lower()
+
 # JWT 认证配置
-jwt_secret = _env("JWT_SECRET", "meeting-ai-jwt-secret-change-in-production")
+jwt_secret_default = "meeting-ai-jwt-secret-change-in-production"
+jwt_secret = _env("JWT_SECRET", jwt_secret_default) or jwt_secret_default
 jwt_expire_hours = int(_env("JWT_EXPIRE_HOURS", "72") or "72")
+
+# CORS（逗号分隔；生产环境勿使用 *）
+cors_origins = _env("CORS_ORIGINS", "http://localhost:8000,http://127.0.0.1:8000") or ""
+
+# 上传限制（字节，默认 100MB）
+max_upload_bytes = int(_env("MAX_UPLOAD_BYTES", "104857600") or "104857600")
+
+# 启动时是否自动 seed 默认用户（生产环境应 false）
+seed_default_users_on_startup = _env_bool("SEED_DEFAULT_USERS", "false")
+
+# 通过 /api/auth/seed 或启动 seed 时使用的初始密码（未设置则随机生成并写日志）
+seed_root_password = _env("SEED_ROOT_PASSWORD", "")
+seed_admin_password = _env("SEED_ADMIN_PASSWORD", "")
 
 # 通义听悟实时转写（CreateTask + MeetingJoinUrl WebSocket）
 tingwu_access_key_id = _env("ALIBABA_CLOUD_ACCESS_KEY_ID", "")

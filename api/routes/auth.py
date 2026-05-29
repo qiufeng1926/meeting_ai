@@ -263,10 +263,18 @@ def review_request(
 
 @router.post('/auth/seed')
 def seed_users(db: Session = Depends(get_db)):
-    """初始化默认管理员账号（仅在没有用户时可用）"""
+    """初始化默认管理员账号（仅在没有用户时可用；密码见 SEED_*_PASSWORD 或服务端日志）"""
     count = db.query(User).count()
     if count > 0:
         raise HTTPException(status_code=400, detail='用户已存在，无需初始化')
-    seed_default_users(db)
+    created = seed_default_users(db)
     db.commit()
-    return {'success': True, 'message': '默认账号已创建: root/root2026, qiufengai/qfai12@@, admin/123456'}
+    return {
+        'success': True,
+        'message': (
+            f"已创建账号: {', '.join(created) or '无新用户'}。"
+            "密码来自环境变量 SEED_ROOT_PASSWORD / SEED_ADMIN_PASSWORD，"
+            "未配置时见服务端日志中的随机密码。"
+        ),
+        'users': created,
+    }

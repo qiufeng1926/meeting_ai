@@ -11,13 +11,14 @@ from fastapi import (
     File,
     Form,
     Depends,
+    HTTPException,
 )
 
 from api.auth_utils import get_current_user
 from db.models import User
 
-from config.config import upload_dir, output_dir
-from asr.engine import FunASREngine
+from config.config import upload_dir, output_dir, max_upload_bytes
+from asr.holder import get_asr_engine
 from llm.client_holder import get_glm_client
 from llm.summary_service import generate_dual_summaries, visual_dict_from_result
 from utils.logger import get_logger
@@ -26,9 +27,6 @@ from db.session import save_meeting_to_db_async
 
 router = APIRouter()
 logger = get_logger("meeting_route")
-
-# 初始化
-asr_engine = FunASREngine()
 
 # 创建目录结构
 os.makedirs(upload_dir, exist_ok=True)
@@ -58,9 +56,16 @@ async def upload_meeting_audio(
     
     logger.info(f"收到音频文件上传请求", extra={'request_id': request_id, 'input_params': input_params})
 
+    content = await file.read()
+    if len(content) > max_upload_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"文件过大，最大允许 {max_upload_bytes // (1024 * 1024)}MB",
+        )
+
     async with _get_batch_sem():
         return await _process_meeting_upload(
-            content=await file.read(),
+            content=content,
             filename=file.filename,
             meeting_name=meeting_name,
             request_id=request_id,
@@ -103,7 +108,7 @@ async def _process_meeting_upload(
         # 异步 ASR 语音转文字
         logger.info(f"开始语音识别...", extra={'request_id': request_id})
         asr_start = time.time()
-        transcript = await asr_engine.transcribe_async(save_path)
+        transcript = await get_asr_engine().transcribe_async(save_path)
         asr_duration = (time.time() - asr_start) * 1000
         logger.info(f"语音识别完成", extra={
             'request_id': request_id, 

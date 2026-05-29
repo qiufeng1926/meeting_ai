@@ -149,34 +149,55 @@ class Meeting(Base):
         Index('idx_status', 'status'),
     )
     
-    def to_dict(self):
-        """转换为字典"""
+    def to_list_dict(self) -> dict:
+        """列表接口轻量字段（不含全文 transcript/summary）"""
         return {
-            'id': self.id,
-            'file_id': self.file_id,
-            'user_id': self.user_id,
-            'meeting_name': self.meeting_name,
-            'original_filename': self.original_filename,
-            'meeting_type': self.meeting_type,
-            'audio_file_path': self.audio_file_path,
-            'transcript_file_path': self.transcript_file_path,
-            'summary_file_path': self.summary_file_path,
-            'transcript': self.transcript,
-            'summary': self.summary,
-            'transcript_length': self.transcript_length,
-            'summary_length': self.summary_length,
-            'audio_duration': self.audio_duration,
-            'asr_duration_ms': self.asr_duration_ms,
-            'llm_duration_ms': self.llm_duration_ms,
-            'total_duration_ms': self.total_duration_ms,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-            'status': self.status,
-            'error_message': self.error_message,
-            'has_summary': bool(self.summary),
-            'has_visual_summary': bool(self.summary_visual),
-            'summary_visual_status': self.summary_visual_status,
-            'preview': (self.transcript or '')[:200],
+            "id": self.id,
+            "file_id": self.file_id,
+            "user_id": self.user_id,
+            "meeting_name": self.meeting_name,
+            "original_filename": self.original_filename,
+            "meeting_type": self.meeting_type,
+            "transcript_length": self.transcript_length,
+            "summary_length": self.summary_length,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "status": self.status,
+            "has_summary": bool(self.summary),
+            "has_visual_summary": bool(self.summary_visual),
+            "summary_visual_status": self.summary_visual_status,
+            "preview": (self.transcript or "")[:200],
+        }
+
+    def to_dict(self, include_content: bool = True):
+        """转换为字典；include_content=False 时同 to_list_dict"""
+        if not include_content:
+            return self.to_list_dict()
+        return {
+            "id": self.id,
+            "file_id": self.file_id,
+            "user_id": self.user_id,
+            "meeting_name": self.meeting_name,
+            "original_filename": self.original_filename,
+            "meeting_type": self.meeting_type,
+            "audio_file_path": self.audio_file_path,
+            "transcript_file_path": self.transcript_file_path,
+            "summary_file_path": self.summary_file_path,
+            "transcript": self.transcript,
+            "summary": self.summary,
+            "transcript_length": self.transcript_length,
+            "summary_length": self.summary_length,
+            "audio_duration": self.audio_duration,
+            "asr_duration_ms": self.asr_duration_ms,
+            "llm_duration_ms": self.llm_duration_ms,
+            "total_duration_ms": self.total_duration_ms,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "status": self.status,
+            "error_message": self.error_message,
+            "has_summary": bool(self.summary),
+            "has_visual_summary": bool(self.summary_visual),
+            "summary_visual_status": self.summary_visual_status,
+            "preview": (self.transcript or "")[:200],
         }
 
 

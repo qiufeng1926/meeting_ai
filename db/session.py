@@ -7,7 +7,12 @@ from datetime import datetime, timedelta
 from sqlalchemy import or_, and_
 from sqlalchemy.orm import Session
 from db.models import init_database, get_session_factory, Meeting, User, PermissionRequest
-from config.config import database_url
+from config.config import (
+    database_url,
+    seed_admin_password,
+    seed_default_users_on_startup,
+    seed_root_password,
+)
 from utils.logger import get_logger
 from api.permissions import ROOT_MEETING_VIEW_DAYS, can_access_meeting
 
@@ -18,50 +23,74 @@ engine = init_database(database_url)
 SessionFactory = get_session_factory(engine)
 
 
-def seed_default_users(session: Session):
-    """创建默认超级管理员和管理员账号"""
+def _resolve_seed_password(env_value: str, label: str) -> str:
+    import secrets
+    import string
+
+    if env_value and env_value.strip():
+        return env_value.strip()
+    pwd = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(16))
+    logger.warning(
+        f"未配置 {label}，已生成随机密码（请查看日志并尽快修改）: {pwd}"
+    )
+    return pwd
+
+
+def seed_default_users(session: Session) -> list[str]:
+    """创建初始管理员账号；密码来自环境变量或随机生成。"""
     from utils.password import hash_password
 
+    root_pwd = _resolve_seed_password(seed_root_password, "SEED_ROOT_PASSWORD")
+    admin_pwd = _resolve_seed_password(seed_admin_password, "SEED_ADMIN_PASSWORD")
+
     defaults = [
-        {'username': 'root', 'nickname': '超级管理员', 'password': 'root2026', 'role': 'root', 'can_view_all': True},
         {
-            'username': 'qiufengai',
-            'nickname': '秋枫AI',
-            'password': 'qfai12@@',
-            'role': 'root',
-            'can_view_all': True,
-            'can_view_all_roots': True,
+            "username": "root",
+            "nickname": "超级管理员",
+            "password": root_pwd,
+            "role": "root",
+            "can_view_all": True,
         },
-        {'username': 'admin', 'nickname': '管理员', 'password': '123456', 'role': 'admin', 'can_view_all': True},
+        {
+            "username": "admin",
+            "nickname": "管理员",
+            "password": admin_pwd,
+            "role": "admin",
+            "can_view_all": True,
+        },
     ]
+    created: list[str] = []
     for item in defaults:
-        existing = session.query(User).filter(User.username == item['username']).first()
+        existing = session.query(User).filter(User.username == item["username"]).first()
         if not existing:
-            session.add(User(
-                username=item['username'],
-                nickname=item['nickname'],
-                password_hash=hash_password(item['password']),
-                role=item['role'],
-                can_view_all=item['can_view_all'],
-                can_view_all_roots=item.get('can_view_all_roots', False),
-            ))
+            session.add(
+                User(
+                    username=item["username"],
+                    nickname=item["nickname"],
+                    password_hash=hash_password(item["password"]),
+                    role=item["role"],
+                    can_view_all=item["can_view_all"],
+                    can_view_all_roots=False,
+                )
+            )
+            created.append(item["username"])
             logger.info(f"默认用户已创建: {item['username']}")
         else:
             if not existing.nickname:
-                existing.nickname = item['nickname']
-            if item.get('can_view_all_roots') and existing.role == 'root':
-                existing.can_view_all_roots = True
+                existing.nickname = item["nickname"]
+    return created
 
 
-try:
-    _seed_session = SessionFactory()
+if seed_default_users_on_startup:
     try:
-        seed_default_users(_seed_session)
-        _seed_session.commit()
-    finally:
-        _seed_session.close()
-except Exception as e:
-    logger.warning(f"默认用户初始化跳过: {e}")
+        _seed_session = SessionFactory()
+        try:
+            seed_default_users(_seed_session)
+            _seed_session.commit()
+        finally:
+            _seed_session.close()
+    except Exception as e:
+        logger.warning(f"默认用户初始化跳过: {e}")
 
 
 @contextmanager
@@ -255,9 +284,10 @@ def get_all_meetings(
     viewer: User = None,
     user_id: int = None,
     can_view_all: bool = False,
-) -> list:
+) -> tuple[list[dict], int]:
     """
-    获取会议记录（分页，支持日期筛选与权限过滤）
+    获取会议记录（分页，支持日期筛选与权限过滤）。
+    返回 (当前页列表, 符合条件的总条数)。
     """
     with get_db_session() as session:
         query = session.query(Meeting)
@@ -268,28 +298,31 @@ def get_all_meetings(
             query = query.filter(Meeting.user_id == user_id)
         elif not can_view_all:
             query = query.filter(Meeting.user_id.is_(None))
-        
-        # 添加日期筛选条件
+
         if start_date:
             try:
                 from datetime import datetime as dt
-                start_dt = dt.strptime(start_date, '%Y-%m-%d')
+                start_dt = dt.strptime(start_date, "%Y-%m-%d")
                 query = query.filter(Meeting.created_at >= start_dt)
             except ValueError:
                 logger.warning(f"无效的开始日期格式: {start_date}")
-        
+
         if end_date:
             try:
                 from datetime import datetime as dt, timedelta
-                end_dt = dt.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
+                end_dt = dt.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
                 query = query.filter(Meeting.created_at < end_dt)
             except ValueError:
                 logger.warning(f"无效的结束日期格式: {end_date}")
-        
-        meetings = query.order_by(Meeting.created_at.desc()).limit(limit).offset(offset).all()
-        
-        # 在会话关闭前转换为字典
-        return [meeting.to_dict() for meeting in meetings]
+
+        total = query.count()
+        meetings = (
+            query.order_by(Meeting.created_at.desc())
+            .limit(limit)
+            .offset(offset)
+            .all()
+        )
+        return [meeting.to_list_dict() for meeting in meetings], total
 
 
 def _remove_file_if_exists(path: str | None):
