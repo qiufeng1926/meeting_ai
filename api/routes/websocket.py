@@ -228,10 +228,15 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
                 
                 # 处理初始化消息（会议名称）
                 if message.get("type") == "init":
-                    meeting_name = message.get("meeting_name", "")
-                    if meeting_name:
-                        session_info["meeting_name"] = meeting_name
-                        logger.info(f"设置会议名称", extra={'request_id': connection_id, 'input_params': {'meeting_name': meeting_name}})
+                    meeting_name = (message.get("meeting_name") or "").strip()
+                    if not meeting_name:
+                        await manager.send_json(connection_id, {
+                            "type": "error",
+                            "message": "会议名称为必填项，请填写后重新开始录音",
+                        })
+                        continue
+                    session_info["meeting_name"] = meeting_name
+                    logger.info(f"设置会议名称", extra={'request_id': connection_id, 'input_params': {'meeting_name': meeting_name}})
                     continue
 
                 if message.get("type") == "record_start":
@@ -266,16 +271,17 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
                     session_info["file_id"] = file_id
                     
                     # 构建文件名（包含会议名称）
-                    meeting_name = session_info.get("meeting_name", "")
-                    if meeting_name:
-                        # 清理文件名中的非法字符
-                        safe_name = "".join(c for c in meeting_name if c.isalnum() or c in (' ', '-', '_')).strip()
-                        safe_name = safe_name.replace(' ', '_')
-                        transcript_filename = f"{safe_name}_{file_id}_{timestamp}_realtime.txt"
-                        summary_filename = f"{safe_name}_{file_id}_{timestamp}_realtime.md"
-                    else:
-                        transcript_filename = f"{file_id}_{timestamp}_realtime.txt"
-                        summary_filename = f"{file_id}_{timestamp}_realtime.md"
+                    meeting_name = (session_info.get("meeting_name") or "").strip()
+                    if not meeting_name:
+                        await manager.send_json(connection_id, {
+                            "type": "error",
+                            "message": "会议名称为必填项，请填写后重新开始录音",
+                        })
+                        continue
+                    safe_name = "".join(c for c in meeting_name if c.isalnum() or c in (' ', '-', '_')).strip()
+                    safe_name = safe_name.replace(' ', '_')
+                    transcript_filename = f"{safe_name}_{file_id}_{timestamp}_realtime.txt"
+                    summary_filename = f"{safe_name}_{file_id}_{timestamp}_realtime.md"
                     
                     # 异步保存转写文本
                     transcript_path = os.path.join(

@@ -943,6 +943,113 @@
             flex-wrap: wrap;
             gap: 12px;
         }
+
+        .admin-modal-box.download-log-modal {
+            max-width: 1020px;
+            width: 96vw;
+        }
+
+        .download-log-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 14px;
+            align-items: flex-end;
+        }
+
+        .download-log-toolbar .dl-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 120px;
+            flex: 1;
+        }
+
+        .download-log-toolbar .dl-field label {
+            font-size: 12px;
+            color: #888;
+        }
+
+        .download-log-toolbar input,
+        .download-log-toolbar select {
+            padding: 8px 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 13px;
+            background: white;
+        }
+
+        .download-log-toolbar-actions {
+            display: flex;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+
+        .download-log-summary {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .download-log-table-wrap {
+            overflow: auto;
+            max-height: 52vh;
+            border: 1px solid #e8e8e8;
+            border-radius: 10px;
+        }
+
+        .download-log-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        .download-log-table th {
+            background: #f5f6fa;
+            padding: 10px 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #555;
+            white-space: nowrap;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+
+        .download-log-table td {
+            padding: 10px 12px;
+            border-top: 1px solid #eee;
+            vertical-align: top;
+            line-height: 1.5;
+        }
+
+        .download-log-table tr:hover td {
+            background: #fafbff;
+        }
+
+        .download-log-table .dl-mono {
+            font-family: Consolas, Monaco, monospace;
+            font-size: 12px;
+            color: #666;
+            word-break: break-all;
+        }
+
+        .download-log-pagination {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 14px;
+            flex-wrap: wrap;
+            gap: 10px;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .download-log-pagination .pager-btns {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
     </style>
 </head>
 <body>
@@ -1010,8 +1117,8 @@
         <!-- 实时转写面板 -->
         <div id="realtimePanel" class="content-panel active">
             <div style="margin-bottom: 20px;">
-                <label style="display: block; color: #666; font-size: 14px; margin-bottom: 8px; font-weight: bold;">📝 会议名称：</label>
-                <input type="text" id="meetingNameInput" placeholder="请输入会议名称（可选）" 
+                <label style="display: block; color: #666; font-size: 14px; margin-bottom: 8px; font-weight: bold;">📝 会议名称：<span style="color:#e74c3c;">*</span></label>
+                <input type="text" id="meetingNameInput" placeholder="请输入会议名称（必填）" required
                        style="width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px; transition: all 0.3s;"
                        onfocus="this.style.borderColor='#667eea'" 
                        onblur="this.style.borderColor='#e0e0e0'">
@@ -1071,8 +1178,8 @@
         <!-- 批量处理面板 -->
         <div id="batchPanel" class="content-panel">
             <div style="margin-bottom: 20px;">
-                <label style="display: block; color: #666; font-size: 14px; margin-bottom: 8px; font-weight: bold;">📝 会议名称：</label>
-                <input type="text" id="batchMeetingNameInput" placeholder="请输入会议名称（可选）" 
+                <label style="display: block; color: #666; font-size: 14px; margin-bottom: 8px; font-weight: bold;">📝 会议名称：<span style="color:#e74c3c;">*</span></label>
+                <input type="text" id="batchMeetingNameInput" placeholder="请输入会议名称（必填）" required
                        style="width: 100%; padding: 12px 15px; border: 2px solid #e0e0e0; border-radius: 8px; font-size: 16px; transition: all 0.3s;"
                        onfocus="this.style.borderColor='#667eea'" 
                        onblur="this.style.borderColor='#e0e0e0'">
@@ -1209,6 +1316,9 @@
                 <button type="button" class="btn-primary" onclick="openAdminReviewLogModal()" style="padding: 12px 24px; background: #5c6bc0;">
                     📋 管理员审批记录
                 </button>
+                <button type="button" class="btn-primary" onclick="openDownloadLogModal()" style="padding: 12px 24px; background: #00897b;">
+                    📥 用户下载记录
+                </button>
             </div>
         </div>
     </div>
@@ -1224,6 +1334,52 @@
             <div class="admin-modal-body">
                 <p class="admin-modal-hint">管理员对「查看全部会议」申请的处理历史（已通过 / 已拒绝）。</p>
                 <div id="adminReviewLogList"><p style="color:#999;">加载中...</p></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 超级管理员：用户下载记录二级弹窗 -->
+    <div id="downloadLogModalOverlay" class="admin-modal-overlay" onclick="if(event.target===this) closeDownloadLogModal()">
+        <div class="admin-modal-box download-log-modal" onclick="event.stopPropagation()">
+            <div class="admin-modal-header">
+                <h3>📥 用户下载记录</h3>
+                <button type="button" class="admin-modal-close" onclick="closeDownloadLogModal()" title="关闭">&times;</button>
+            </div>
+            <div class="admin-modal-body">
+                <p class="admin-modal-hint">可按用户、会议名称、会议 ID、导出类型、日期范围筛选，支持分页浏览。</p>
+                <div class="download-log-toolbar">
+                    <div class="dl-field" style="flex:2;min-width:180px;">
+                        <label for="dlKeyword">关键词</label>
+                        <input type="text" id="dlKeyword" placeholder="用户名 / 昵称 / 会议名 / 会议 ID"
+                               onkeydown="if(event.key==='Enter') searchDownloadLogs()">
+                    </div>
+                    <div class="dl-field">
+                        <label for="dlExportType">导出类型</label>
+                        <select id="dlExportType">
+                            <option value="">全部类型</option>
+                            <option value="summary_docx">Word 总结</option>
+                            <option value="visual_html">图文 HTML</option>
+                            <option value="visual_json">图文 JSON</option>
+                        </select>
+                    </div>
+                    <div class="dl-field">
+                        <label for="dlDateFrom">开始日期</label>
+                        <input type="date" id="dlDateFrom">
+                    </div>
+                    <div class="dl-field">
+                        <label for="dlDateTo">结束日期</label>
+                        <input type="date" id="dlDateTo">
+                    </div>
+                    <div class="download-log-toolbar-actions">
+                        <button type="button" class="btn-sm btn-primary" onclick="searchDownloadLogs()">查询</button>
+                        <button type="button" class="btn-sm" style="background:#eee;color:#333;" onclick="resetDownloadLogFilters()">重置</button>
+                    </div>
+                </div>
+                <div id="downloadLogSummary" class="download-log-summary"></div>
+                <div class="download-log-table-wrap">
+                    <div id="downloadLogList"><p style="color:#999;padding:12px;">加载中...</p></div>
+                </div>
+                <div id="downloadLogPagination" class="download-log-pagination" style="display:none;"></div>
             </div>
         </div>
     </div>
@@ -1480,6 +1636,146 @@
 
         function closeAdminReviewLogModal() {
             document.getElementById('reviewLogModalOverlay').classList.remove('active');
+        }
+
+        let downloadLogPage = 1;
+        let downloadLogPageSize = 20;
+        let downloadLogTotalPages = 0;
+
+        function openDownloadLogModal() {
+            document.getElementById('downloadLogModalOverlay').classList.add('active');
+            loadDownloadLogs(1);
+        }
+
+        function closeDownloadLogModal() {
+            document.getElementById('downloadLogModalOverlay').classList.remove('active');
+        }
+
+        function searchDownloadLogs() {
+            loadDownloadLogs(1);
+        }
+
+        function resetDownloadLogFilters() {
+            document.getElementById('dlKeyword').value = '';
+            document.getElementById('dlExportType').value = '';
+            document.getElementById('dlDateFrom').value = '';
+            document.getElementById('dlDateTo').value = '';
+            loadDownloadLogs(1);
+        }
+
+        function changeDownloadLogPage(delta) {
+            const next = downloadLogPage + delta;
+            if (next < 1 || (downloadLogTotalPages && next > downloadLogTotalPages)) return;
+            loadDownloadLogs(next);
+        }
+
+        function onDownloadLogPageSizeChange() {
+            downloadLogPageSize = parseInt(document.getElementById('dlPageSize').value, 10) || 20;
+            loadDownloadLogs(1);
+        }
+
+        const EXPORT_TYPE_LABELS = {
+            summary_docx: 'Word 总结',
+            visual_html: '图文 HTML',
+            visual_json: '图文 JSON',
+        };
+
+        function buildDownloadLogQuery(page) {
+            const params = new URLSearchParams({
+                page: String(page),
+                page_size: String(downloadLogPageSize),
+            });
+            const keyword = document.getElementById('dlKeyword').value.trim();
+            const exportType = document.getElementById('dlExportType').value;
+            const dateFrom = document.getElementById('dlDateFrom').value;
+            const dateTo = document.getElementById('dlDateTo').value;
+            if (keyword) params.set('keyword', keyword);
+            if (exportType) params.set('export_type', exportType);
+            if (dateFrom) params.set('date_from', dateFrom);
+            if (dateTo) params.set('date_to', dateTo);
+            return params.toString();
+        }
+
+        function renderDownloadLogPagination(data) {
+            const pager = document.getElementById('downloadLogPagination');
+            if (!data.total) {
+                pager.style.display = 'none';
+                return;
+            }
+            downloadLogPage = data.page;
+            downloadLogTotalPages = data.total_pages;
+            pager.style.display = 'flex';
+            pager.innerHTML = `
+                <div>共 <strong>${data.total}</strong> 条 · 第 ${data.page} / ${Math.max(data.total_pages, 1)} 页</div>
+                <div class="pager-btns">
+                    <label style="display:flex;align-items:center;gap:6px;">
+                        每页
+                        <select id="dlPageSize" onchange="onDownloadLogPageSizeChange()" style="padding:6px 8px;border-radius:6px;border:1px solid #ddd;">
+                            <option value="10" ${downloadLogPageSize === 10 ? 'selected' : ''}>10</option>
+                            <option value="20" ${downloadLogPageSize === 20 ? 'selected' : ''}>20</option>
+                            <option value="50" ${downloadLogPageSize === 50 ? 'selected' : ''}>50</option>
+                            <option value="100" ${downloadLogPageSize === 100 ? 'selected' : ''}>100</option>
+                        </select>
+                        条
+                    </label>
+                    <button type="button" class="btn-sm" style="background:#eee;color:#333;"
+                        onclick="changeDownloadLogPage(-1)" ${data.page <= 1 ? 'disabled' : ''}>上一页</button>
+                    <button type="button" class="btn-sm" style="background:#eee;color:#333;"
+                        onclick="changeDownloadLogPage(1)" ${data.page >= data.total_pages ? 'disabled' : ''}>下一页</button>
+                </div>`;
+        }
+
+        async function loadDownloadLogs(page = 1) {
+            const el = document.getElementById('downloadLogList');
+            const summaryEl = document.getElementById('downloadLogSummary');
+            el.innerHTML = '<p style="color:#999;padding:12px;">加载中...</p>';
+            summaryEl.textContent = '';
+            try {
+                const resp = await authFetch('/api/admin/download-logs?' + buildDownloadLogQuery(page));
+                const data = await resp.json();
+                if (!resp.ok) {
+                    el.innerHTML = '<p style="color:#f44336;padding:12px;">' + escapeHtml(data.detail || '加载失败') + '</p>';
+                    document.getElementById('downloadLogPagination').style.display = 'none';
+                    return;
+                }
+                renderDownloadLogPagination(data);
+                if (!data.logs || data.logs.length === 0) {
+                    el.innerHTML = '<p style="color:#999;padding:12px;">未找到匹配的下载记录</p>';
+                    return;
+                }
+                const rows = data.logs.map(log => {
+                    const typeLabel = EXPORT_TYPE_LABELS[log.export_type] || log.export_type;
+                    const downloadedAt = log.created_at
+                        ? new Date(log.created_at).toLocaleString('zh-CN')
+                        : '—';
+                    const userLabel = escapeHtml((log.nickname || log.username || '未知') +
+                        (log.username && log.nickname !== log.username ? ` (${log.username})` : ''));
+                    return `<tr>
+                        <td style="white-space:nowrap;">${downloadedAt}</td>
+                        <td>${userLabel}</td>
+                        <td><strong>${escapeHtml(log.meeting_name)}</strong></td>
+                        <td><span style="color:#00897b;">${typeLabel}</span></td>
+                        <td>${escapeHtml(log.meeting_owner_username || '—')}</td>
+                        <td class="dl-mono">${escapeHtml(log.file_id || '—')}</td>
+                    </tr>`;
+                }).join('');
+                el.innerHTML = `<table class="download-log-table">
+                    <thead>
+                        <tr>
+                            <th>下载时间</th>
+                            <th>下载用户</th>
+                            <th>会议名称</th>
+                            <th>导出类型</th>
+                            <th>会议归属</th>
+                            <th>会议 ID</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>`;
+            } catch (e) {
+                el.innerHTML = '<p style="color:#f44336;padding:12px;">加载失败</p>';
+                document.getElementById('downloadLogPagination').style.display = 'none';
+            }
         }
 
         function hideAdminPermPanels(userId) {
@@ -1962,6 +2258,11 @@
                 alert('暂无下载/导出权限，请在「账户管理」中申请');
                 return;
             }
+            const exportTitle = (title || '').trim();
+            if (!fileId && !exportTitle) {
+                alert('请先填写会议名称');
+                return;
+            }
             try {
                 let response;
                 if (fileId) {
@@ -1970,7 +2271,7 @@
                     response = await authFetch('/api/export/summary', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ content, title: title || 'AI 智能速览' }),
+                        body: JSON.stringify({ content, title: exportTitle }),
                     });
                 } else {
                     alert('无可导出的总结');
@@ -1992,6 +2293,11 @@
                 alert('暂无下载/导出权限，请在「账户管理」中申请');
                 return;
             }
+            const exportTitle = (title || '').trim();
+            if (!fileId && !exportTitle) {
+                alert('请先填写会议名称');
+                return;
+            }
             try {
                 let response;
                 const fmt = format === 'json' ? 'json' : 'html';
@@ -2001,7 +2307,7 @@
                     response = await authFetch(`/api/export/visual?format=${fmt}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ visual, title: title || 'AI 智能速览' }),
+                        body: JSON.stringify({ visual, title: exportTitle }),
                     });
                 } else {
                     alert('无可下载的图文速览');
@@ -2024,10 +2330,14 @@
                 const mdEl = document.getElementById('realtimeSummaryMarkdown');
                 const content = (mdEl ? mdEl.textContent : '').trim();
                 const meetingName = document.getElementById('meetingNameInput').value.trim();
+                if (!meetingName && !lastRealtimeFileId) {
+                    alert('请先填写会议名称');
+                    return;
+                }
                 exportSummaryDocx({
                     fileId: lastRealtimeFileId,
                     content: lastRealtimeFileId ? null : content,
-                    title: meetingName || 'AI 智能速览',
+                    title: meetingName,
                 });
             } else if (source === 'batch') {
                 const mdEl = document.getElementById('batchSummaryMarkdown');
@@ -2043,10 +2353,14 @@
         function exportVisual(source, format) {
             if (source === 'realtime') {
                 const meetingName = document.getElementById('meetingNameInput').value.trim();
+                if (!meetingName && !lastRealtimeFileId) {
+                    alert('请先填写会议名称');
+                    return;
+                }
                 exportVisualHtml({
                     fileId: lastRealtimeFileId,
                     visual: lastRealtimeFileId ? null : lastRealtimeVisual,
-                    title: meetingName || 'AI 智能速览',
+                    title: meetingName,
                     format,
                 });
             } else if (source === 'batch') {
@@ -2060,11 +2374,11 @@
         }
 
         function exportHistorySummary(fileId, title) {
-            exportSummaryDocx({ fileId, title: title || 'AI 智能速览' });
+            exportSummaryDocx({ fileId, title });
         }
 
         function exportHistoryVisual(fileId, title, format) {
-            exportVisualHtml({ fileId, title: title || 'AI 智能速览', format });
+            exportVisualHtml({ fileId, title, format });
         }
 
         // ========== 原有功能 ==========
@@ -2081,7 +2395,7 @@
         let lastRealtimeVisual = null;
         let lastBatchFileId = null;
         let lastBatchVisual = null;
-        let lastBatchSummaryTitle = 'AI 智能速览';
+        let lastBatchSummaryTitle = '';
         
         const statusEl = document.getElementById('status');
         const micWarningEl = document.getElementById('micWarning');
@@ -2195,15 +2509,12 @@
                 console.log('WebSocket 连接成功');
                 updateStatus('已连接', true);
                 
-                // 发送会议名称（如果有）
-                if (meetingName) {
-                    const initMessage = {
-                        type: 'init',
-                        meeting_name: meetingName
-                    };
-                    ws.send(JSON.stringify(initMessage));
-                    console.log('发送会议名称:', meetingName);
-                }
+                const initMessage = {
+                    type: 'init',
+                    meeting_name: meetingName
+                };
+                ws.send(JSON.stringify(initMessage));
+                console.log('发送会议名称:', meetingName);
             };
             
             ws.onmessage = (event) => {
@@ -2752,8 +3063,13 @@
                 lastRealtimeFileId = null;
                 totalTextEl.textContent = '';
 
-                // 获取会议名称
+                // 获取会议名称（必填）
                 const meetingName = document.getElementById('meetingNameInput').value.trim();
+                if (!meetingName) {
+                    alert('请先填写会议名称');
+                    document.getElementById('meetingNameInput').focus();
+                    return;
+                }
 
                 // 必须在用户点击后尽快请求麦克风（浏览器安全策略）
                 stream = await navigator.mediaDevices.getUserMedia({
@@ -2939,8 +3255,13 @@
             const summaryResult = document.getElementById('summaryResult');
             const transcriptText = document.getElementById('transcriptText');
             
-            // 获取会议名称
+            // 获取会议名称（必填）
             const meetingName = document.getElementById('batchMeetingNameInput').value.trim();
+            if (!meetingName) {
+                alert('请先填写会议名称');
+                document.getElementById('batchMeetingNameInput').focus();
+                return;
+            }
             
             uploadBtn.disabled = true;
             uploadBtn.innerHTML = '<span class="loading"></span>处理中...';
@@ -2948,9 +3269,7 @@
             
             const formData = new FormData();
             formData.append('file', selectedFile);
-            if (meetingName) {
-                formData.append('meeting_name', meetingName);
-            }
+            formData.append('meeting_name', meetingName);
             
             try {
                 const response = await authFetch('/api/meeting/upload', {
@@ -2966,7 +3285,7 @@
                 
                 if (result.success) {
                     lastBatchFileId = result.file_id || null;
-                    lastBatchSummaryTitle = document.getElementById('batchMeetingNameInput').value.trim() || 'AI 智能速览';
+                    lastBatchSummaryTitle = document.getElementById('batchMeetingNameInput').value.trim();
                     // 显示转写文本
                     transcriptText.textContent = result.transcript;
                     transcriptResult.style.display = 'block';

@@ -7,12 +7,13 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
-from api.auth_utils import get_current_user
+from api.auth_utils import get_current_user, get_db
 from api.permissions import can_download_files
 from config.config import output_dir
 from db.models import User
-from db.session import check_meeting_access, get_meeting_by_file_id
+from db.session import check_meeting_access, get_meeting_by_file_id, log_meeting_download
 from utils.docx_export import build_export_filename, markdown_to_docx
 from utils.visual_export import (
     build_visual_export_filename,
@@ -35,12 +36,12 @@ def _require_download_permission(user: User) -> None:
 
 class SummaryExportRequest(BaseModel):
     content: str = Field(..., min_length=1)
-    title: str = Field(default="AI 智能速览", max_length=100)
+    title: str = Field(..., min_length=1, max_length=100)
 
 
 class VisualExportRequest(BaseModel):
     visual: dict[str, Any] = Field(...)
-    title: str = Field(default="AI 智能速览", max_length=100)
+    title: str = Field(..., min_length=1, max_length=100)
 
 
 def _docx_response(content: str, title: str, file_id: str | None = None) -> Response:
@@ -136,10 +137,16 @@ def _json_attachment_response(visual: dict, title: str, file_id: str | None = No
     )
 
 
+def _meeting_owner_id(file_id: str) -> int | None:
+    meeting = get_meeting_by_file_id(file_id)
+    return meeting.user_id if meeting else None
+
+
 @router.get("/meetings/{file_id}/export/summary")
 async def export_meeting_summary_docx(
     file_id: str,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """导出指定会议的 AI 总结为 Word 文档"""
     _require_download_permission(current_user)
@@ -150,6 +157,14 @@ async def export_meeting_summary_docx(
         raise HTTPException(status_code=403, detail="无权导出该会议")
 
     summary, title = _load_summary_for_meeting(file_id)
+    log_meeting_download(
+        db,
+        user_id=current_user.id,
+        meeting_name=title,
+        export_type='summary_docx',
+        file_id=file_id,
+        meeting_user_id=_meeting_owner_id(file_id),
+    )
     logger.info(f"导出 AI 总结: file_id={file_id}, user={current_user.username}")
     return _docx_response(summary, title, file_id)
 
@@ -158,11 +173,19 @@ async def export_meeting_summary_docx(
 async def export_summary_content_docx(
     body: SummaryExportRequest,
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """根据总结正文直接导出 Word（用于刚生成尚未跳转历史的场景）"""
     _require_download_permission(current_user)
-    logger.info(f"导出 AI 总结内容: user={current_user.username}, title={body.title}")
-    return _docx_response(body.content.strip(), body.title.strip() or "AI 智能速览")
+    title = body.title.strip()
+    log_meeting_download(
+        db,
+        user_id=current_user.id,
+        meeting_name=title,
+        export_type='summary_docx',
+    )
+    logger.info(f"导出 AI 总结内容: user={current_user.username}, title={title}")
+    return _docx_response(body.content.strip(), title)
 
 
 @router.get("/meetings/{file_id}/export/visual")
@@ -170,6 +193,7 @@ async def export_meeting_visual(
     file_id: str,
     format: str = 'html',
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """导出指定会议的图文速览（html 或 json）"""
     _require_download_permission(current_user)
@@ -181,6 +205,15 @@ async def export_meeting_visual(
 
     visual, title = _load_visual_for_meeting(file_id)
     fmt = (format or 'html').lower()
+    export_type = 'visual_json' if fmt == 'json' else 'visual_html'
+    log_meeting_download(
+        db,
+        user_id=current_user.id,
+        meeting_name=title,
+        export_type=export_type,
+        file_id=file_id,
+        meeting_user_id=_meeting_owner_id(file_id),
+    )
     logger.info(f"导出图文速览: file_id={file_id}, format={fmt}, user={current_user.username}")
 
     if fmt == 'json':
@@ -193,11 +226,19 @@ async def export_visual_content(
     body: VisualExportRequest,
     format: str = 'html',
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     """根据图文 JSON 直接导出（用于刚生成尚未入库的场景）"""
     _require_download_permission(current_user)
-    title = body.title.strip() or 'AI 智能速览'
+    title = body.title.strip()
     fmt = (format or 'html').lower()
+    export_type = 'visual_json' if fmt == 'json' else 'visual_html'
+    log_meeting_download(
+        db,
+        user_id=current_user.id,
+        meeting_name=title,
+        export_type=export_type,
+    )
     logger.info(f"导出图文速览内容: user={current_user.username}, title={title}, format={fmt}")
 
     if fmt == 'json':

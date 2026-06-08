@@ -65,6 +65,41 @@ class User(Base):
         return self.is_root() or (self.role == 'admin' and self.can_approve_download)
 
 
+class MeetingDownloadLog(Base):
+    """会议文件下载记录"""
+    __tablename__ = 'meeting_download_logs'
+
+    id = Column(Integer, primary_key=True, autoincrement=True, comment='主键ID')
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True, comment='下载用户ID')
+    file_id = Column(String(64), nullable=True, index=True, comment='会议 file_id')
+    meeting_name = Column(String(255), nullable=False, comment='会议名称')
+    export_type = Column(String(32), nullable=False, comment='导出类型: summary_docx/visual_html/visual_json')
+    meeting_user_id = Column(Integer, ForeignKey('users.id'), nullable=True, comment='会议创建者ID')
+    created_at = Column(DateTime, nullable=False, default=datetime.now, comment='下载时间')
+
+    downloader = relationship('User', foreign_keys=[user_id])
+    meeting_owner = relationship('User', foreign_keys=[meeting_user_id])
+
+    __table_args__ = (
+        Index('idx_download_log_created_at', 'created_at'),
+        Index('idx_download_log_user_id', 'user_id'),
+    )
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'username': self.downloader.username if self.downloader else None,
+            'nickname': self.downloader.nickname if self.downloader else None,
+            'file_id': self.file_id,
+            'meeting_name': self.meeting_name,
+            'export_type': self.export_type,
+            'meeting_user_id': self.meeting_user_id,
+            'meeting_owner_username': self.meeting_owner.username if self.meeting_owner else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 class PermissionRequest(Base):
     """权限申请表"""
     __tablename__ = 'permission_requests'

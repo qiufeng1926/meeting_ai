@@ -3,13 +3,14 @@
 """
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from api.auth_utils import get_current_user, get_db
 from api.permissions import can_access_meeting
-from db.models import PermissionRequest, User, Meeting
+from db.models import PermissionRequest, User, Meeting, MeetingDownloadLog
 from db.session import delete_meeting_with_files
 from utils.password import hash_password
 from utils.logger import get_logger
@@ -151,6 +152,67 @@ def delete_user(
     db.commit()
     logger.info(f"超级管理员删除用户: {user.username}, by={current_user.username}")
     return {'success': True, 'message': f'已删除用户 {user.username}'}
+
+
+def _parse_log_date(value: str, end_of_day: bool = False) -> datetime:
+    try:
+        dt = datetime.strptime(value.strip(), '%Y-%m-%d')
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail='日期格式应为 YYYY-MM-DD') from exc
+    if end_of_day:
+        return dt.replace(hour=23, minute=59, second=59)
+    return dt
+
+
+@router.get('/admin/download-logs')
+def list_download_logs(
+    current_user: User = Depends(require_root),
+    db: Session = Depends(get_db),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    keyword: str = Query('', max_length=100),
+    export_type: str = Query('', max_length=32),
+    date_from: str | None = Query(None, description='开始日期 YYYY-MM-DD'),
+    date_to: str | None = Query(None, description='结束日期 YYYY-MM-DD'),
+):
+    """超级管理员查看全员会议下载记录（支持筛选与分页）"""
+    query = db.query(MeetingDownloadLog).join(
+        User, MeetingDownloadLog.user_id == User.id
+    )
+
+    kw = keyword.strip()
+    if kw:
+        like = f'%{kw}%'
+        query = query.filter(or_(
+            User.username.like(like),
+            User.nickname.like(like),
+            MeetingDownloadLog.meeting_name.like(like),
+            MeetingDownloadLog.file_id.like(like),
+        ))
+
+    et = export_type.strip()
+    if et:
+        query = query.filter(MeetingDownloadLog.export_type == et)
+
+    if date_from:
+        query = query.filter(MeetingDownloadLog.created_at >= _parse_log_date(date_from))
+    if date_to:
+        query = query.filter(MeetingDownloadLog.created_at <= _parse_log_date(date_to, end_of_day=True))
+
+    query = query.order_by(MeetingDownloadLog.created_at.desc())
+    total = query.count()
+    offset = (page - 1) * page_size
+    logs = query.offset(offset).limit(page_size).all()
+    total_pages = (total + page_size - 1) // page_size if total else 0
+
+    return {
+        'success': True,
+        'total': total,
+        'page': page,
+        'page_size': page_size,
+        'total_pages': total_pages,
+        'logs': [log.to_dict() for log in logs],
+    }
 
 
 @router.delete('/admin/meetings/{file_id}')

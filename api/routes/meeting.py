@@ -63,6 +63,10 @@ async def upload_meeting_audio(
             detail=f"文件过大，最大允许 {max_upload_bytes // (1024 * 1024)}MB",
         )
 
+    if not meeting_name or not meeting_name.strip():
+        raise HTTPException(status_code=400, detail='会议名称为必填项')
+    meeting_name = meeting_name.strip()
+
     async with _get_batch_sem():
         return await _process_meeting_upload(
             content=content,

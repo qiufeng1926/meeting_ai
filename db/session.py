@@ -6,7 +6,14 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import or_, and_
 from sqlalchemy.orm import Session
-from db.models import init_database, get_session_factory, Meeting, User, PermissionRequest
+from db.models import (
+    init_database,
+    get_session_factory,
+    Meeting,
+    User,
+    PermissionRequest,
+    MeetingDownloadLog,
+)
 from config.config import (
     database_url,
     seed_admin_password,
@@ -366,4 +373,26 @@ def delete_meeting_with_files(file_id: str) -> bool:
         _remove_file_if_exists(path)
     logger.info(f"会议记录及文件已删除: file_id={file_id}")
     return True
+
+
+def log_meeting_download(
+    session: Session,
+    *,
+    user_id: int,
+    meeting_name: str,
+    export_type: str,
+    file_id: str | None = None,
+    meeting_user_id: int | None = None,
+) -> None:
+    """记录用户下载/导出会议文件"""
+    name = (meeting_name or '').strip() or '未命名会议'
+    entry = MeetingDownloadLog(
+        user_id=user_id,
+        file_id=file_id,
+        meeting_name=name[:255],
+        export_type=export_type,
+        meeting_user_id=meeting_user_id,
+    )
+    session.add(entry)
+    session.commit()
 
