@@ -83,10 +83,8 @@ def _load_visual_for_meeting(file_id: str) -> tuple[dict, str]:
         if meeting.meeting_name:
             title = meeting.meeting_name
         if meeting.summary_visual:
-            try:
-                visual = json.loads(meeting.summary_visual)
-            except json.JSONDecodeError:
-                pass
+            from llm.visual_schema import visual_dict_for_display
+            visual = visual_dict_for_display(meeting.summary_visual)
 
     if visual is None:
         summaries_dir = os.path.join(output_dir, "summaries")
@@ -94,8 +92,9 @@ def _load_visual_for_meeting(file_id: str) -> tuple[dict, str]:
             for name in os.listdir(summaries_dir):
                 if file_id in name and name.endswith('_visual.json'):
                     path = os.path.join(summaries_dir, name)
+                    from llm.visual_schema import visual_dict_for_display
                     with open(path, 'r', encoding='utf-8') as f:
-                        visual = json.load(f)
+                        visual = visual_dict_for_display(f.read())
                     break
 
     if not visual:

@@ -183,12 +183,10 @@ def dual_result_to_db_fields(result: DualSummaryResult) -> dict:
 
 
 def visual_dict_from_result(result: DualSummaryResult) -> dict | None:
+    from llm.visual_schema import visual_dict_for_display
+
     if result.visual:
         return visual_summary_to_dict(result.visual)
     if result.visual_json:
-        import json
-        try:
-            return json.loads(result.visual_json)
-        except json.JSONDecodeError:
-            return None
+        return visual_dict_for_display(result.visual_json)
     return None

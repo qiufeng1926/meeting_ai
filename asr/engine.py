@@ -9,10 +9,34 @@ from config.config import (
     asr_model_name,
     asr_streaming_model_name,
     asr_vad_model_name,
+    asr_model_hub,
     asr_device,
     ffmpeg_path,
     asr_energy_threshold,
 )
+
+
+# FunASR 内置映射的 iic VAD 在 ModelScope 已不可用，改走 damo
+_DAMO_VAD = "damo/speech_fsmn_vad_zh-cn-16k-common-pytorch"
+_VAD_MODEL_OVERRIDES = {
+    "fsmn-vad": _DAMO_VAD,
+    "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch": _DAMO_VAD,
+    # 常见误配（把 ASR 的 vocab8404 拼进 VAD 名）
+    "iic/speech_fsmn_vad_zh-cn-16k-common-vocab8404-pytorch": _DAMO_VAD,
+}
+
+
+def _resolve_funasr_model_name(name: str) -> str:
+    """将 paraformer-zh / fsmn-vad 等短名映射为 ModelScope 全名。"""
+    if name in _VAD_MODEL_OVERRIDES:
+        return _VAD_MODEL_OVERRIDES[name]
+    try:
+        from funasr.download.name_maps_from_hub import name_maps_ms
+
+        resolved = name_maps_ms.get(name, name)
+        return _VAD_MODEL_OVERRIDES.get(resolved, resolved)
+    except Exception:
+        return name
 
 logger = get_logger("asr_engine")
 
@@ -190,9 +214,11 @@ class FunASREngine:
         ffmpeg_path_str: str | None = None,
         energy_threshold: float | None = None,
     ):
-        model_name = model_name or asr_model_name
-        streaming_model_name = streaming_model_name or asr_streaming_model_name
-        vad_model_name = vad_model_name or asr_vad_model_name
+        model_name = _resolve_funasr_model_name(model_name or asr_model_name)
+        streaming_model_name = _resolve_funasr_model_name(
+            streaming_model_name or asr_streaming_model_name
+        )
+        vad_model_name = _resolve_funasr_model_name(vad_model_name or asr_vad_model_name)
         device = device or asr_device
         ffmpeg_path_str = ffmpeg_path_str or ffmpeg_path
         self.energy_threshold = (
@@ -205,14 +231,29 @@ class FunASREngine:
 
         logger.info(
             "加载批量 ASR 模型",
-            extra={"input_params": {"model": model_name, "device": device}},
+            extra={
+                "input_params": {
+                    "model": model_name,
+                    "vad_model": vad_model_name,
+                    "hub": asr_model_hub,
+                    "device": device,
+                }
+            },
         )
-        self.batch_model = AutoModel(
-            model=model_name,
-            vad_model=vad_model_name,
-            device=device,
-            disable_update=True,
-        )
+        try:
+            self.batch_model = AutoModel(
+                model=model_name,
+                vad_model=vad_model_name,
+                hub=asr_model_hub,
+                device=device,
+                disable_update=True,
+            )
+        except AssertionError as e:
+            raise RuntimeError(
+                f"FunASR 模型加载失败: {e}。"
+                f"请检查 .env 中 ASR_MODEL_NAME / ASR_VAD_MODEL_NAME 是否为 ModelScope 全名，"
+                f"并确认网络可访问 modelscope.cn 以下载模型。"
+            ) from e
 
         self._streaming_model = None
         self._vad_model = None
@@ -227,6 +268,7 @@ class FunASREngine:
             )
             self._streaming_model = AutoModel(
                 model=self.streaming_model_name,
+                hub=asr_model_hub,
                 device=asr_device,
                 disable_update=True,
             )
@@ -240,6 +282,7 @@ class FunASREngine:
             )
             self._vad_model = AutoModel(
                 model=self.vad_model_name,
+                hub=asr_model_hub,
                 device=asr_device,
                 disable_update=True,
             )

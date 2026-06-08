@@ -30,10 +30,15 @@ def _path_from_env(key: str, default_relative: str) -> str:
     return str(p)
 
 
-# ASR 配置
-asr_model_name = _env("ASR_MODEL_NAME", "paraformer-zh")
-asr_streaming_model_name = _env("ASR_STREAMING_MODEL_NAME", "paraformer-zh-streaming")
-asr_vad_model_name = _env("ASR_VAD_MODEL_NAME", "fsmn-vad")
+# ASR 配置（批量上传；短名如 paraformer-zh/fsmn-vad 在部分环境未注册，建议用 ModelScope 全名）
+_DEFAULT_ASR_MODEL = "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
+_DEFAULT_ASR_STREAMING = "iic/speech_paraformer-large_asr_nat-zh-cn-16k-common-vocab8404-online"
+# iic/ 路径在 ModelScope 已 404，改用 damo/ 同名模型
+_DEFAULT_ASR_VAD = "damo/speech_fsmn_vad_zh-cn-16k-common-pytorch"
+asr_model_name = _env("ASR_MODEL_NAME", _DEFAULT_ASR_MODEL)
+asr_streaming_model_name = _env("ASR_STREAMING_MODEL_NAME", _DEFAULT_ASR_STREAMING)
+asr_vad_model_name = _env("ASR_VAD_MODEL_NAME", _DEFAULT_ASR_VAD)
+asr_model_hub = _env("ASR_MODEL_HUB", "ms") or "ms"
 asr_energy_threshold = float(_env("ASR_ENERGY_THRESHOLD", "0.006") or "0.006")
 asr_device = _env("ASR_DEVICE", "cpu")
 ffmpeg_path = _env("FFMPEG_PATH", r"D:\AI\ffmpeg-8.1.1-essentials_build\bin")

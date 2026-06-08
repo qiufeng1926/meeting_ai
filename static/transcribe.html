@@ -2158,9 +2158,118 @@
             if (btnVis) btnVis.classList.toggle('active', !isMd);
         }
 
+        function parseVisualData(raw) {
+            if (!raw) return null;
+            if (typeof raw === 'string') {
+                try {
+                    return JSON.parse(raw);
+                } catch (e) {
+                    console.warn('图文 JSON 解析失败', e);
+                    return null;
+                }
+            }
+            return raw;
+        }
+
+        function normalizeVisualForDisplay(visual) {
+            const data = parseVisualData(visual);
+            if (!data || typeof data !== 'object') return null;
+
+            const sectionsIn = data.sections || data.items || [];
+            const sectionsOut = [];
+
+            function coerceList(value) {
+                if (!value) return [];
+                if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
+                if (typeof value === 'string') {
+                    return value.split(/[\n；;，,]+/).map(s => s.trim()).filter(Boolean);
+                }
+                return [String(value).trim()].filter(Boolean);
+            }
+
+            function cardHasContent(card) {
+                if (!card || typeof card !== 'object') return false;
+                return Boolean(
+                    (card.title || card.name || card.heading || '').trim()
+                    || coerceList(card.bullets || card.points || card.items).length
+                    || (card.highlight || card.summary || card.content || '').trim()
+                );
+            }
+
+            sectionsIn.forEach((sec, idx) => {
+                if (!sec || typeof sec !== 'object') return;
+                const secTitle = (sec.title || sec.name || sec.heading || sec.topic || '').trim();
+                let cards = [];
+
+                const rawCards = sec.cards || sec.items || sec.children || [];
+                if (Array.isArray(rawCards)) {
+                    rawCards.forEach(item => {
+                        if (typeof item === 'string' && item.trim()) {
+                            cards.push({ title: '', bullets: [item.trim()], icon: 'doc' });
+                            return;
+                        }
+                        if (!item || typeof item !== 'object') return;
+                        const card = {
+                            title: (item.title || item.name || item.heading || '').trim(),
+                            icon: item.icon || 'doc',
+                            tag: item.tag || null,
+                            bullets: coerceList(item.bullets || item.points || item.items),
+                            highlight: (item.highlight || item.summary || item.content || '').trim() || null,
+                        };
+                        if (cardHasContent(card)) cards.push(card);
+                    });
+                }
+
+                const secPoints = coerceList(sec.bullets || sec.points || sec.items || sec.content);
+                if (!cards.length && secPoints.length) {
+                    cards.push({ title: secTitle || '要点', icon: 'doc', bullets: secPoints });
+                } else if (!cards.length && secTitle) {
+                    const desc = (sec.description || sec.summary || sec.content || sec.highlight || '').trim();
+                    cards.push({
+                        title: secTitle,
+                        icon: 'doc',
+                        bullets: desc ? [desc] : ['（该主题详情见文字速览）'],
+                    });
+                }
+
+                cards = cards.map(card => {
+                    if (!card.title) {
+                        if (card.bullets && card.bullets.length) {
+                            const first = card.bullets[0];
+                            card.title = first.length > 24 ? first.slice(0, 24) + '…' : first;
+                        } else {
+                            card.title = secTitle || '要点';
+                        }
+                    }
+                    if (!card.bullets.length && card.highlight) {
+                        card.bullets = [card.highlight];
+                    }
+                    return card;
+                }).filter(cardHasContent);
+
+                if (!cards.length) return;
+
+                sectionsOut.push({
+                    id: String(sectionsOut.length + 1).padStart(2, '0'),
+                    title: secTitle || cards[0].title || `分区 ${idx + 1}`,
+                    theme: sec.theme || ['green', 'orange', 'blue', 'pink', 'teal', 'brown', 'purple', 'red'][sectionsOut.length % 8],
+                    layout: cards.length <= 1 ? 'full' : (cards.length === 2 ? 'grid-2' : 'grid-3'),
+                    cards,
+                });
+            });
+
+            return {
+                title: data.title || '',
+                subtitle: data.subtitle || '',
+                sections: sectionsOut,
+                footer: data.footer || {},
+            };
+        }
+
         function renderVisualSummary(container, visual, status) {
             if (!container) return;
-            if (!visual) {
+            visual = normalizeVisualForDisplay(visual);
+            if (!visual || !visual.sections || !visual.sections.length) {
                 if (status === 'failed') {
                     container.innerHTML = '<p style="color:#e74c3c;text-align:center;padding:20px;">图文速览生成失败，请稍后刷新或查看文字速览。</p>';
                 } else {
@@ -2192,19 +2301,28 @@
                         <div class="visual-section-title">${escapeHtml(sec.title || '')}</div>
                     </div>
                     <div class="visual-cards layout-${layout}">`;
-                (sec.cards || []).forEach(card => {
+                const cards = (sec.cards || []).filter(card =>
+                    (card.title || '').trim() || (card.bullets || []).length || (card.highlight || '').trim()
+                );
+                if (!cards.length) return;
+                cards.forEach(card => {
                     const icon = VISUAL_ICONS[card.icon] || '📄';
+                    const bullets = card.bullets || [];
                     html += `<div class="visual-card">
                         <div class="visual-card-head">
                             <span class="visual-card-icon">${icon}</span>
                             <span class="visual-card-title">${escapeHtml(card.title || '')}</span>
                             ${card.tag ? `<span class="${visualTagClass(card.tag)}">${escapeHtml(card.tag)}</span>` : ''}
-                        </div>
-                        <ul class="visual-card-bullets">
-                            ${(card.bullets || []).map(b => `<li>${escapeHtml(b)}</li>`).join('')}
-                        </ul>
-                        ${card.highlight ? `<div class="visual-card-highlight">${escapeHtml(card.highlight)}</div>` : ''}
-                    </div>`;
+                        </div>`;
+                    if (bullets.length) {
+                        html += `<ul class="visual-card-bullets">
+                            ${bullets.map(b => `<li>${escapeHtml(b)}</li>`).join('')}
+                        </ul>`;
+                    }
+                    if (card.highlight) {
+                        html += `<div class="visual-card-highlight">${escapeHtml(card.highlight)}</div>`;
+                    }
+                    html += `</div>`;
                 });
                 html += `</div></div>`;
             });

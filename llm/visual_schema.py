@@ -91,6 +91,67 @@ def _extract_json_object(text: str) -> str:
     return text
 
 
+def _pick_str(data: dict, *keys: str) -> str:
+    for key in keys:
+        val = data.get(key)
+        if val is not None and str(val).strip():
+            return str(val).strip()
+    return ''
+
+
+def _card_dict_has_content(card: dict) -> bool:
+    if not isinstance(card, dict):
+        return False
+    return bool(
+        _pick_str(card, 'title', 'name', 'heading')
+        or _coerce_str_list(card.get('bullets') or card.get('points') or card.get('items'))
+        or _pick_str(card, 'highlight', 'summary', 'content')
+    )
+
+
+def _section_dict_to_cards(sec: dict) -> list[dict]:
+    """将 LLM 多种字段写法统一为 cards 列表"""
+    raw_cards = sec.get('cards') or sec.get('items') or sec.get('children') or []
+    cards: list[dict] = []
+
+    if isinstance(raw_cards, list):
+        for item in raw_cards:
+            if isinstance(item, str) and item.strip():
+                cards.append({'title': '', 'bullets': [item.strip()]})
+            elif isinstance(item, dict):
+                cards.append({
+                    'title': _pick_str(item, 'title', 'name', 'heading'),
+                    'icon': item.get('icon') or 'doc',
+                    'tag': item.get('tag'),
+                    'bullets': _coerce_str_list(
+                        item.get('bullets') or item.get('points') or item.get('items')
+                    ),
+                    'highlight': _pick_str(item, 'highlight', 'summary', 'content') or None,
+                })
+
+    section_points = _coerce_str_list(
+        sec.get('bullets') or sec.get('points') or sec.get('items') or sec.get('content')
+    )
+    section_title = _pick_str(sec, 'title', 'name', 'heading', 'topic')
+
+    if not cards and section_points:
+        cards.append({
+            'title': section_title or '要点',
+            'icon': 'doc',
+            'bullets': section_points,
+        })
+    elif not cards and section_title:
+        desc = _pick_str(sec, 'description', 'summary', 'content', 'highlight')
+        bullets = [desc] if desc else []
+        cards.append({
+            'title': section_title,
+            'icon': 'doc',
+            'bullets': bullets,
+        })
+
+    return [c for c in cards if _card_dict_has_content(c)]
+
+
 def _sanitize_visual_payload(payload: dict) -> dict:
     """校验前修正常见 LLM 输出格式问题"""
     footer = payload.get('footer')
@@ -98,12 +159,32 @@ def _sanitize_visual_payload(payload: dict) -> dict:
         for key in ('contacts', 'next_steps'):
             if key in footer:
                 footer[key] = _coerce_str_list(footer.get(key))
-    for sec in payload.get('sections') or []:
+
+    sections_in = payload.get('sections') or payload.get('items') or []
+    sections_out: list[dict] = []
+    for sec in sections_in:
         if not isinstance(sec, dict):
+            if isinstance(sec, str) and sec.strip():
+                sections_out.append({
+                    'title': sec.strip(),
+                    'cards': [{'title': sec.strip(), 'bullets': []}],
+                })
             continue
-        for card in sec.get('cards') or []:
-            if isinstance(card, dict) and 'bullets' in card:
-                card['bullets'] = _coerce_str_list(card.get('bullets'))
+        cards = _section_dict_to_cards(sec)
+        title = _pick_str(sec, 'title', 'name', 'heading', 'topic')
+        if not title and cards:
+            title = _pick_str(cards[0], 'title', 'name', 'heading') or '未命名分区'
+        if not title and not cards:
+            continue
+        sections_out.append({
+            'id': sec.get('id'),
+            'title': title,
+            'theme': sec.get('theme') or 'green',
+            'layout': sec.get('layout') or 'grid-3',
+            'cards': cards,
+        })
+
+    payload['sections'] = sections_out
     return payload
 
 
@@ -124,24 +205,74 @@ def layout_for_card_count(count: int) -> str:
     return 'grid-4'
 
 
+def _card_has_content(card: VisualCard) -> bool:
+    return bool(
+        (card.title or '').strip()
+        or card.bullets
+        or (card.highlight or '').strip()
+    )
+
+
+def _fill_card_defaults(card: VisualCard, section_title: str) -> VisualCard:
+    if not (card.title or '').strip():
+        if card.bullets:
+            card.title = (card.bullets[0][:24] + '…') if len(card.bullets[0]) > 24 else card.bullets[0]
+        elif section_title:
+            card.title = section_title
+        else:
+            card.title = '要点'
+    if not card.bullets and (card.highlight or '').strip():
+        card.bullets = [card.highlight.strip()]
+    return card
+
+
 def normalize_visual_summary(visual: VisualSummary) -> VisualSummary:
-    """分区编号 01/02…、按卡片数自动布局、规范 tag"""
+    """分区编号 01/02…、按卡片数自动布局、规范 tag、补齐空卡片"""
+    normalized_sections: list[VisualSection] = []
+
     for i, sec in enumerate(visual.sections):
-        sec.id = str(i + 1).zfill(2)
-        sec.theme = THEMES[i % len(THEMES)]
-        n = len(sec.cards)
-        sec.layout = layout_for_card_count(n)
+        sec_title = (sec.title or '').strip()
+        cards = [_fill_card_defaults(c, sec_title) for c in sec.cards if _card_has_content(c)]
+
+        if not cards and sec_title:
+            cards = [VisualCard(title=sec_title, bullets=['（该主题详情见文字速览）'])]
+
+        if not cards:
+            continue
+
+        sec.cards = cards
+        sec.id = str(len(normalized_sections) + 1).zfill(2)
+        sec.theme = THEMES[len(normalized_sections) % len(THEMES)]
+        sec.layout = layout_for_card_count(len(cards))
         for card in sec.cards:
             if card.tag and card.tag not in TAG_LABELS:
                 for label in TAG_LABELS:
                     if label in card.tag:
                         card.tag = label
                         break
+        normalized_sections.append(sec)
 
-    if len(visual.sections) > MAX_SECTIONS:
-        visual.sections = visual.sections[:MAX_SECTIONS]
-
+    visual.sections = normalized_sections[:MAX_SECTIONS]
     return visual
+
+
+def visual_dict_for_display(data: dict | str | None) -> dict | None:
+    """将库中/文件中的图文 JSON 规范为可展示结构（兼容历史脏数据）"""
+    if not data:
+        return None
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        payload = _sanitize_visual_payload(dict(data))
+        visual = VisualSummary.model_validate(payload)
+        return visual_summary_to_dict(normalize_visual_summary(visual))
+    except (json.JSONDecodeError, ValueError, ValidationError):
+        return None
 
 
 def split_transcript_chunks(text: str, max_chars: int, overlap: int = 400) -> list[str]:

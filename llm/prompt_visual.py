@@ -24,12 +24,13 @@ def build_visual_prompt(transcript: str, meeting_name: str | None = None) -> str
 
 【输出要求】
 1. 只输出一个合法 JSON 对象，不要 Markdown、不要代码块标记、不要任何解释文字
-2. 根据转写自然划分 3～8 个 section，每个 section 含 1～6 张 card
+2. 根据转写自然划分 3～8 个 section，每个 section 必须含 1～6 张 card（禁止只输出 section 标题而无 cards）
 3. section.title 为本场自拟话题名；layout 取 grid-2 | grid-3 | grid-4 | full 之一
 4. theme 取 green | orange | blue | pink | teal | brown | purple | red 之一，各 section 可不同
-5. card 字段：title, icon（简短英文如 doc/trophy/people/policy/chat/money/calendar/star，无合适用 doc）, tag（可选，仅从：重点、待跟进、已决策、风险、待确认 中选）, bullets（2～5 条字符串）, highlight（可选，一句收束）
-6. footer：contacts（联系人/角色，无则 []）, next_steps（下一步，无则 []）, core_consensus（核心共识一段话，无则 null）
-7. 禁止输出转写中未出现的事实
+5. card 字段：title, icon（简短英文如 doc/trophy/people/policy/chat/money/calendar/star，无合适用 doc）, tag（可选，仅从：重点、待跟进、已决策、风险、待确认 中选）, bullets（必填，每条 card 至少 2 条要点字符串）, highlight（可选，一句收束）
+6. 禁止把要点只写在 section.title 里；每个 section 的 cards 数组不能为空
+7. footer：contacts（联系人/角色，无则 []）, next_steps（下一步，无则 []）, core_consensus（核心共识一段话，无则 null）
+8. 禁止输出转写中未出现的事实
 
 【JSON 结构】
 {{

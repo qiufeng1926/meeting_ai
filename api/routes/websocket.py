@@ -575,6 +575,7 @@ async def get_meeting(file_id: str, current_user: User = Depends(get_current_use
 
         import json as json_lib
         from db.session import get_meeting_by_file_id
+        from llm.visual_schema import visual_dict_for_display
 
         meeting_record = get_meeting_by_file_id(file_id)
         transcript = None
@@ -591,10 +592,7 @@ async def get_meeting(file_id: str, current_user: User = Depends(get_current_use
             transcript_file = meeting_record.transcript_file_path
             summary_file = meeting_record.summary_file_path
             if meeting_record.summary_visual:
-                try:
-                    summary_visual = json_lib.loads(meeting_record.summary_visual)
-                except json_lib.JSONDecodeError:
-                    summary_visual = None
+                summary_visual = visual_dict_for_display(meeting_record.summary_visual)
 
         transcripts_dir = os.path.join(output_dir, "transcripts")
         summaries_dir = os.path.join(output_dir, "summaries")
@@ -635,8 +633,8 @@ async def get_meeting(file_id: str, current_user: User = Depends(get_current_use
             if os.path.exists(visual_file):
                 try:
                     with open(visual_file, "r", encoding="utf-8") as vf:
-                        summary_visual = json_lib.loads(vf.read())
-                        if not summary_visual_status:
+                        summary_visual = visual_dict_for_display(vf.read())
+                        if summary_visual and not summary_visual_status:
                             summary_visual_status = "completed"
                 except json_lib.JSONDecodeError:
                     pass
