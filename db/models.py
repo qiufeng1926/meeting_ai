@@ -20,6 +20,8 @@ class User(Base):
     can_view_all = Column(Boolean, nullable=False, default=False, comment='是否可查看所有会议')
     can_view_root_meetings = Column(Boolean, nullable=False, default=False, comment='管理员是否可查看超级管理员会议(限3天)')
     can_view_all_roots = Column(Boolean, nullable=False, default=False, comment='超级管理员是否可查看其他超级管理员的会议')
+    can_download = Column(Boolean, nullable=False, default=False, comment='是否可下载/导出会议文件')
+    can_approve_download = Column(Boolean, nullable=False, default=False, comment='管理员是否可审批下载权限申请')
     created_at = Column(DateTime, nullable=False, default=datetime.now, comment='创建时间')
     updated_at = Column(DateTime, nullable=False, default=datetime.now, onupdate=datetime.now, comment='更新时间')
 
@@ -35,6 +37,8 @@ class User(Base):
             'can_view_all': self.can_view_all or self.role in ('admin', 'root'),
             'can_view_root_meetings': self.can_view_root_meetings,
             'can_view_all_roots': self.can_view_all_roots,
+            'can_download': self.can_download or self.role == 'root',
+            'can_approve_download': self.can_approve_download or self.role == 'root',
             'created_at': self.created_at.isoformat() if self.created_at else None,
         }
         if include_sensitive:
@@ -53,6 +57,12 @@ class User(Base):
     def can_view_peer_root_meetings(self) -> bool:
         """是否可查看其他超级管理员的会议（默认超级管理员之间互不可见）"""
         return self.is_root() and self.can_view_all_roots
+
+    def can_download_files(self) -> bool:
+        return self.is_root() or self.can_download
+
+    def can_approve_download_requests(self) -> bool:
+        return self.is_root() or (self.role == 'admin' and self.can_approve_download)
 
 
 class PermissionRequest(Base):
@@ -258,6 +268,20 @@ def migrate_schema(engine):
                 "UPDATE users SET can_view_all_roots = 1 WHERE username = 'qiufengai' AND role = 'root'"
             ))
             conn.commit()
+
+        for col, col_def in (
+            ('can_download', "TINYINT(1) NOT NULL DEFAULT 0 COMMENT '是否可下载/导出会议文件'"),
+            ('can_approve_download', "TINYINT(1) NOT NULL DEFAULT 0 COMMENT '管理员是否可审批下载权限申请'"),
+        ):
+            result = conn.execute(text(f"""
+                SELECT COUNT(*) FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'
+                AND COLUMN_NAME = '{col}'
+            """))
+            if result.scalar() == 0:
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {col_def}"))
+                conn.commit()
+                print(f"[OK] users 表已添加 {col} 字段")
 
         for col, col_def in (
             ('summary_visual', "TEXT NULL COMMENT '图文速览JSON'"),

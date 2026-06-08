@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from utils.password import hash_password, verify_password
 from api.auth_utils import create_access_token, get_current_user, get_db
+from api.permissions import can_approve_download_requests
 from db.models import PermissionRequest, User
 from db.session import seed_default_users
 from utils.logger import get_logger
@@ -30,7 +31,7 @@ class LoginRequest(BaseModel):
 
 
 class PermissionApplyRequest(BaseModel):
-    request_type: str = Field(..., pattern='^(view_all|admin|view_root_meetings)$')
+    request_type: str = Field(..., pattern='^(view_all|admin|view_root_meetings|download)$')
     reason: str = Field(default='', max_length=500)
 
 
@@ -112,6 +113,12 @@ def apply_permission(
         if current_user.can_view_root_meetings:
             raise HTTPException(status_code=400, detail='您已拥有查看超级管理员会议的权限')
 
+    if body.request_type == 'download':
+        if current_user.is_root():
+            raise HTTPException(status_code=400, detail='超级管理员默认可下载，无需申请')
+        if current_user.can_download_files():
+            raise HTTPException(status_code=400, detail='您已拥有下载/导出权限')
+
     pending = db.query(PermissionRequest).filter(
         PermissionRequest.user_id == current_user.id,
         PermissionRequest.request_type == body.request_type,
@@ -163,17 +170,24 @@ def list_pending_requests(
                 or_(
                     and_(User.role == 'user', PermissionRequest.request_type == 'admin'),
                     and_(User.role == 'admin', PermissionRequest.request_type == 'view_root_meetings'),
+                    and_(User.role != 'root', PermissionRequest.request_type == 'download'),
                 ),
             )
         )
     elif current_user.is_admin():
+        pending_filters = [
+            and_(User.role == 'user', PermissionRequest.request_type == 'view_all'),
+        ]
+        if current_user.can_approve_download_requests():
+            pending_filters.append(
+                and_(User.role != 'root', PermissionRequest.request_type == 'download'),
+            )
         query = (
             db.query(PermissionRequest)
             .join(User, PermissionRequest.user_id == User.id)
             .filter(
                 PermissionRequest.status == 'pending',
-                User.role == 'user',
-                PermissionRequest.request_type == 'view_all',
+                or_(*pending_filters),
             )
         )
     else:
@@ -230,6 +244,9 @@ def review_request(
     elif req.request_type == 'view_root_meetings':
         if not current_user.is_root():
             raise HTTPException(status_code=403, detail='仅超级管理员可审批该申请')
+    elif req.request_type == 'download':
+        if not can_approve_download_requests(current_user):
+            raise HTTPException(status_code=403, detail='无权审批下载权限申请')
     else:
         raise HTTPException(status_code=400, detail='未知申请类型')
 
@@ -250,6 +267,8 @@ def review_request(
             applicant.can_view_all = True
         elif req.request_type == 'view_root_meetings':
             applicant.can_view_root_meetings = True
+        elif req.request_type == 'download':
+            applicant.can_download = True
     else:
         req.status = 'rejected'
 

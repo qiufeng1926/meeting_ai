@@ -37,3 +37,17 @@ def can_access_meeting(viewer: User, meeting: Meeting, owner: User | None) -> bo
         return True
 
     return False
+
+
+def can_download_files(user: User) -> bool:
+    """是否可导出/下载 Word、图文等文件（超级管理员默认允许）"""
+    if user.is_root():
+        return True
+    return bool(getattr(user, 'can_download', False))
+
+
+def can_approve_download_requests(user: User) -> bool:
+    """是否可审批「下载权限」申请（超级管理员默认可；管理员需被授权）"""
+    if user.is_root():
+        return True
+    return user.role == 'admin' and bool(getattr(user, 'can_approve_download', False))

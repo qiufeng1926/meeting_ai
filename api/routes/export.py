@@ -9,6 +9,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from api.auth_utils import get_current_user
+from api.permissions import can_download_files
 from config.config import output_dir
 from db.models import User
 from db.session import check_meeting_access, get_meeting_by_file_id
@@ -22,6 +23,14 @@ from utils.logger import get_logger
 
 router = APIRouter()
 logger = get_logger("export_route")
+
+
+def _require_download_permission(user: User) -> None:
+    if not can_download_files(user):
+        raise HTTPException(
+            status_code=403,
+            detail='暂无下载/导出权限，请在账户管理中向超级管理员申请',
+        )
 
 
 class SummaryExportRequest(BaseModel):
@@ -133,6 +142,7 @@ async def export_meeting_summary_docx(
     current_user: User = Depends(get_current_user),
 ):
     """导出指定会议的 AI 总结为 Word 文档"""
+    _require_download_permission(current_user)
     exists, allowed = check_meeting_access(file_id, current_user)
     if not exists:
         raise HTTPException(status_code=404, detail="会议不存在")
@@ -150,6 +160,7 @@ async def export_summary_content_docx(
     current_user: User = Depends(get_current_user),
 ):
     """根据总结正文直接导出 Word（用于刚生成尚未跳转历史的场景）"""
+    _require_download_permission(current_user)
     logger.info(f"导出 AI 总结内容: user={current_user.username}, title={body.title}")
     return _docx_response(body.content.strip(), body.title.strip() or "AI 智能速览")
 
@@ -161,6 +172,7 @@ async def export_meeting_visual(
     current_user: User = Depends(get_current_user),
 ):
     """导出指定会议的图文速览（html 或 json）"""
+    _require_download_permission(current_user)
     exists, allowed = check_meeting_access(file_id, current_user)
     if not exists:
         raise HTTPException(status_code=404, detail='会议不存在')
@@ -183,6 +195,7 @@ async def export_visual_content(
     current_user: User = Depends(get_current_user),
 ):
     """根据图文 JSON 直接导出（用于刚生成尚未入库的场景）"""
+    _require_download_permission(current_user)
     title = body.title.strip() or 'AI 智能速览'
     fmt = (format or 'html').lower()
     logger.info(f"导出图文速览内容: user={current_user.username}, title={title}, format={fmt}")

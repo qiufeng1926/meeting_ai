@@ -1364,6 +1364,23 @@
             return false;
         }
 
+        function userCanDownload() {
+            return currentUser && (currentUser.role === 'root' || currentUser.can_download);
+        }
+
+        function updateExportButtonsState() {
+            const allowed = userCanDownload();
+            document.querySelectorAll('.btn-export, .btn-export-visual').forEach(btn => {
+                if (!allowed) {
+                    btn.disabled = true;
+                    btn.title = '暂无下载权限，请在账户管理申请';
+                } else {
+                    btn.disabled = false;
+                    btn.title = '';
+                }
+            });
+        }
+
         function updateAccountPanel() {
             if (!currentUser) return;
             const roleLabel = ROLE_LABELS[currentUser.role] || currentUser.role;
@@ -1371,6 +1388,15 @@
                 `昵称：<strong>${currentUser.nickname || currentUser.username}</strong><br>` +
                 `用户名：<strong>${currentUser.username}</strong><br>` +
                 `角色：<strong>${roleLabel}</strong><br>`;
+
+            if (currentUser.role === 'root') {
+                accountHtml += `下载/导出权限：<strong>是（超级管理员）</strong><br>`;
+            } else {
+                accountHtml += `下载/导出权限：<strong>${currentUser.can_download ? '是' : '否'}</strong><br>`;
+                if (currentUser.role === 'admin') {
+                    accountHtml += `可审批下载申请：<strong>${currentUser.can_approve_download ? '是' : '否'}</strong><br>`;
+                }
+            }
 
             if (currentUser.role === 'admin') {
                 accountHtml +=
@@ -1387,28 +1413,41 @@
             const applyHint = document.getElementById('applyHint');
             const applyType = document.getElementById('applyType');
 
+            const downloadApply =
+                '<option value="download">申请下载/导出权限（需超级管理员或已授权管理员审批）</option>';
+
             if (currentUser.role === 'root') {
                 applySection.style.display = 'none';
             } else if (currentUser.role === 'admin') {
-                if (currentUser.can_view_root_meetings) {
-                    applySection.style.display = 'none';
-                    applyHint.textContent = '您已拥有查看超级管理员会议的权限（仅限最近3天）。';
-                } else {
+                const opts = [];
+                if (!currentUser.can_view_root_meetings) {
+                    opts.push('<option value="view_root_meetings">申请查看超级管理员会议（限3天内，需超级管理员审批）</option>');
+                }
+                if (!currentUser.can_download) {
+                    opts.push(downloadApply);
+                }
+                if (opts.length) {
                     applySection.style.display = 'block';
-                    applyType.innerHTML = '<option value="view_root_meetings">申请查看超级管理员会议（限3天内，需超级管理员审批）</option>';
-                    applyHint.textContent = '默认无法查看超级管理员创建的会议，需向超级管理员申请。';
+                    applyType.innerHTML = opts.join('');
+                    applyHint.textContent = '可向超级管理员申请查阅或下载权限；下载申请也可由已授权审批的管理员处理。';
+                } else {
+                    applySection.style.display = 'none';
+                    applyHint.textContent = '您已拥有当前角色下的查阅与下载权限。';
                 }
             } else {
-                applySection.style.display = 'block';
-                applyType.innerHTML =
-                    '<option value="view_all">申请查看全部会议（需管理员审批）</option>' +
-                    '<option value="admin">申请成为管理员（需超级管理员审批）</option>';
-                if (currentUser.can_view_all) {
-                    applyType.innerHTML = '<option value="admin">申请成为管理员（需超级管理员审批）</option>';
-                    applyHint.textContent = '您已拥有查看全部会议权限。';
-                } else {
-                    applyHint.textContent = '普通用户默认只能查看自己创建的会议记录。';
+                const opts = [];
+                if (!currentUser.can_view_all) {
+                    opts.push('<option value="view_all">申请查看全部会议（需管理员审批）</option>');
                 }
+                opts.push('<option value="admin">申请成为管理员（需超级管理员审批）</option>');
+                if (!currentUser.can_download) {
+                    opts.push(downloadApply);
+                }
+                applySection.style.display = 'block';
+                applyType.innerHTML = opts.join('');
+                applyHint.textContent = currentUser.can_view_all
+                    ? '您已拥有查看全部会议权限，仍可申请下载或管理员权限。'
+                    : '普通用户默认只能查看自己创建的会议记录。';
             }
 
             const reviewSection = document.getElementById('reviewSection');
@@ -1421,6 +1460,8 @@
 
             document.getElementById('rootAdminSection').style.display =
                 currentUser.role === 'root' ? 'flex' : 'none';
+
+            updateExportButtonsState();
         }
 
         function openAdminModal() {
@@ -1443,9 +1484,11 @@
 
         function hideAdminPermPanels(userId) {
             const meeting = document.getElementById('adminPermMeeting_' + userId);
+            const download = document.getElementById('adminPermDownload_' + userId);
             const account = document.getElementById('adminPermAccount_' + userId);
             const pwd = document.getElementById('adminResetPwd_' + userId);
             if (meeting) meeting.style.display = 'none';
+            if (download) download.style.display = 'none';
             if (account) account.style.display = 'none';
             if (pwd) pwd.style.display = 'none';
         }
@@ -1454,6 +1497,8 @@
             hideAdminPermPanels(userId);
             if (action === 'meeting') {
                 document.getElementById('adminPermMeeting_' + userId).style.display = 'block';
+            } else if (action === 'download') {
+                document.getElementById('adminPermDownload_' + userId).style.display = 'block';
             } else if (action === 'account') {
                 document.getElementById('adminPermAccount_' + userId).style.display = 'block';
             } else if (action === 'password') {
@@ -1485,6 +1530,7 @@
             view_all: '查看全部会议',
             admin: '成为管理员',
             view_root_meetings: '查看超级管理员会议',
+            download: '下载/导出会议文件',
         };
 
         async function loadMyRequests() {
@@ -1614,6 +1660,29 @@
             return '<p style="color:#999;margin:0;">该角色无需设置查阅会议权限。</p>';
         }
 
+        function buildDownloadPermPanel(u) {
+            let html = `
+                <div class="auth-field">
+                    <label>下载/导出会议文件（Word、图文）</label>
+                    <select id="adminCanDownload_${u.id}">
+                        <option value="0" ${!u.can_download ? 'selected' : ''}>不可下载</option>
+                        <option value="1" ${u.can_download ? 'selected' : ''}>允许下载</option>
+                    </select>
+                </div>`;
+            if (u.role === 'admin') {
+                html += `
+                <div class="auth-field">
+                    <label>审批他人下载权限申请</label>
+                    <select id="adminCanApproveDownload_${u.id}">
+                        <option value="0" ${!u.can_approve_download ? 'selected' : ''}>不可审批</option>
+                        <option value="1" ${u.can_approve_download ? 'selected' : ''}>可审批下载申请</option>
+                    </select>
+                </div>
+                <p style="color:#999;font-size:12px;margin:0;">仅超级管理员可授权管理员审批下载申请。</p>`;
+            }
+            return html;
+        }
+
         function renderAdminUserRow(u) {
             const roleLabel = ROLE_LABELS[u.role] || u.role;
             const isRoot = u.role === 'root';
@@ -1621,8 +1690,11 @@
             let permInfo = '';
             if (u.role === 'admin') {
                 permInfo = `查阅：可查看其他用户会议；超级管理员会议 ${u.can_view_root_meetings ? '可查看（限3天）' : '不可查看'}`;
+                permInfo += `；下载：${u.can_download ? '允许' : '禁止'}`;
+                permInfo += `；审批下载：${u.can_approve_download ? '已授权' : '未授权'}`;
             } else if (u.role === 'user') {
                 permInfo = `查阅：${u.can_view_all ? '可查看全部会议' : '仅自己的会议'}`;
+                permInfo += `；下载：${u.can_download ? '允许' : '禁止'}`;
             }
 
             if (isRoot) {
@@ -1652,6 +1724,7 @@
                     <select onchange="onAdminPermActionChange(${u.id}, this.value); this.value='';">
                         <option value="">选择操作…</option>
                         <option value="meeting">修改查阅会议权限</option>
+                        <option value="download">修改下载权限</option>
                         <option value="account">修改用户账号权限</option>
                         <option value="password">重置密码</option>
                     </select>
@@ -1662,6 +1735,14 @@
                     ${buildMeetingPermPanel(u)}
                     <div class="admin-perm-actions">
                         <button type="button" class="btn-sm btn-primary" onclick="saveAdminMeetingPerm(${u.id})">保存</button>
+                        <button type="button" class="btn-sm" style="background:#eee;color:#666;" onclick="hideAdminPermPanels(${u.id})">取消</button>
+                    </div>
+                </div>
+                <div id="adminPermDownload_${u.id}" class="admin-perm-panel" style="display:none;">
+                    <div style="font-weight:bold;color:#667eea;margin-bottom:10px;font-size:14px;">修改下载权限</div>
+                    ${buildDownloadPermPanel(u)}
+                    <div class="admin-perm-actions">
+                        <button type="button" class="btn-sm btn-primary" onclick="saveAdminDownloadPerm(${u.id})">保存</button>
                         <button type="button" class="btn-sm" style="background:#eee;color:#666;" onclick="hideAdminPermPanels(${u.id})">取消</button>
                     </div>
                 </div>
@@ -1720,6 +1801,32 @@
                 el.innerHTML = adminUsersCache.map(renderAdminUserRow).join('');
             } catch (e) {
                 el.innerHTML = '<p style="color:#f44336;">加载失败</p>';
+            }
+        }
+
+        async function saveAdminDownloadPerm(userId) {
+            const user = adminUsersCache.find(u => u.id === userId);
+            if (!user || user.role === 'root') return;
+            const body = {
+                can_download: document.getElementById('adminCanDownload_' + userId)?.value === '1',
+            };
+            if (user.role === 'admin') {
+                body.can_approve_download =
+                    document.getElementById('adminCanApproveDownload_' + userId)?.value === '1';
+            }
+            try {
+                const resp = await authFetch(`/api/admin/users/${userId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                const data = await resp.json();
+                if (!resp.ok) { alert(data.detail || '保存失败'); return; }
+                alert('下载权限已更新');
+                hideAdminPermPanels(userId);
+                loadAdminUsers();
+            } catch (e) {
+                alert(e.message);
             }
         }
 
@@ -1851,6 +1958,10 @@
         }
 
         async function exportSummaryDocx({ fileId, content, title }) {
+            if (!userCanDownload()) {
+                alert('暂无下载/导出权限，请在「账户管理」中申请');
+                return;
+            }
             try {
                 let response;
                 if (fileId) {
@@ -1877,6 +1988,10 @@
         }
 
         async function exportVisualHtml({ fileId, visual, title, format = 'html' }) {
+            if (!userCanDownload()) {
+                alert('暂无下载/导出权限，请在「账户管理」中申请');
+                return;
+            }
             try {
                 let response;
                 const fmt = format === 'json' ? 'json' : 'html';
