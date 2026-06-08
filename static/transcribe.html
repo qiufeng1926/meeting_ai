@@ -108,6 +108,29 @@
             background: #efe;
             color: #3c3;
         }
+
+        .mic-warning {
+            display: none;
+            background: #fff8e1;
+            border: 1px solid #ffcc80;
+            color: #e65100;
+            padding: 12px 14px;
+            border-radius: 10px;
+            margin-bottom: 16px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .mic-warning.visible {
+            display: block;
+        }
+
+        .mic-warning code {
+            background: rgba(0, 0, 0, 0.06);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
         
         .controls {
             display: flex;
@@ -997,6 +1020,8 @@
             <div id="status" class="status disconnected">
                 未连接
             </div>
+
+            <div id="micWarning" class="mic-warning" role="alert"></div>
                     
             <div class="controls">
                 <button id="startBtn" class="btn-primary" onclick="startRecording()">
@@ -1944,10 +1969,81 @@
         let lastBatchSummaryTitle = 'AI 智能速览';
         
         const statusEl = document.getElementById('status');
+        const micWarningEl = document.getElementById('micWarning');
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         const currentTextEl = document.getElementById('currentText');
         const totalTextEl = document.getElementById('totalText');
+
+        function isLocalhostHost(hostname) {
+            return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+        }
+
+        function canUseMicrophone() {
+            if (window.location.protocol === 'file:') {
+                return {
+                    ok: false,
+                    reason: '请通过服务器地址打开页面（如 http://localhost:8000），不要直接双击 HTML 文件。',
+                };
+            }
+            if (!window.isSecureContext) {
+                const host = window.location.host;
+                return {
+                    ok: false,
+                    reason:
+                        `当前地址 <code>${host}</code> 不是浏览器认可的安全环境，无法调用麦克风。` +
+                        '请改用 <code>https://</code> 访问，或在同一台电脑上使用 ' +
+                        '<code>http://localhost:8000</code> / <code>http://127.0.0.1:8000</code>。',
+                };
+            }
+            if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+                return {
+                    ok: false,
+                    reason: '当前浏览器不支持麦克风 API，请使用 Chrome、Edge 或 Firefox 最新版。',
+                };
+            }
+            return { ok: true };
+        }
+
+        function describeMicError(error) {
+            const name = error && error.name ? error.name : '';
+            const msg = error && error.message ? error.message : String(error);
+            if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+                return '麦克风权限被拒绝。请点击地址栏左侧的锁/站点图标，将麦克风设为「允许」，然后刷新页面重试。';
+            }
+            if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+                return '未检测到可用麦克风，请确认设备已连接且未被其他程序占用。';
+            }
+            if (name === 'NotReadableError' || name === 'TrackStartError') {
+                return '麦克风被其他应用占用或驱动异常，请关闭占用麦克风的程序后重试。';
+            }
+            if (name === 'SecurityError') {
+                return '浏览器安全策略阻止了麦克风访问。请使用 https:// 或 http://localhost 打开本页。';
+            }
+            if (name === 'OverconstrainedError') {
+                return '麦克风参数不兼容，请尝试更换浏览器或检查系统录音设备。';
+            }
+            return `无法访问麦克风：${msg || name || '未知错误'}`;
+        }
+
+        function stopMediaStream(stream) {
+            if (!stream) return;
+            stream.getTracks().forEach(track => track.stop());
+        }
+
+        function updateMicrophoneHint() {
+            if (!micWarningEl) return;
+            const check = canUseMicrophone();
+            if (check.ok) {
+                micWarningEl.classList.remove('visible');
+                micWarningEl.innerHTML = '';
+                startBtn.disabled = false;
+                return;
+            }
+            micWarningEl.innerHTML = `⚠️ ${check.reason}`;
+            micWarningEl.classList.add('visible');
+            startBtn.disabled = true;
+        }
         
         // 切换标签页
         function switchTab(tab) {
@@ -2392,7 +2488,21 @@
 
         // 开始录音
         async function startRecording() {
+            let stream = null;
             try {
+                if (!authToken) {
+                    showAuthOverlay();
+                    alert('请先登录后再开始录音');
+                    return;
+                }
+
+                const micCheck = canUseMicrophone();
+                if (!micCheck.ok) {
+                    alert(micCheck.reason.replace(/<[^>]+>/g, ''));
+                    updateMicrophoneHint();
+                    return;
+                }
+
                 sessionEnding = false;
                 pendingFileId = null;
                 pollAbort = true;
@@ -2411,23 +2521,26 @@
 
                 // 获取会议名称
                 const meetingName = document.getElementById('meetingNameInput').value.trim();
-                
-                // 获取麦克风权限
-                const stream = await navigator.mediaDevices.getUserMedia({ 
+
+                // 必须在用户点击后尽快请求麦克风（浏览器安全策略）
+                stream = await navigator.mediaDevices.getUserMedia({
                     audio: {
                         channelCount: 1,
                         echoCancellation: true,
                         noiseSuppression: true,
-                        autoGainControl: true
-                    }
+                        autoGainControl: true,
+                    },
                 });
-                
+
                 // 连接 WebSocket 并等待就绪后再采集
                 connectWebSocket(meetingName);
                 await waitForWebSocketOpen(ws);
-                
+
                 // 使用设备实际采样率，由服务端重采样到 16kHz
                 audioContext = new AudioContext();
+                if (audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
                 const sourceSampleRate = audioContext.sampleRate;
                 const source = audioContext.createMediaStreamSource(stream);
                 const processor = audioContext.createScriptProcessor(4096, 1, 1);
@@ -2483,7 +2596,11 @@
                 
             } catch (error) {
                 console.error('录音启动失败:', error);
-                alert('无法访问麦克风，请检查权限设置');
+                stopMediaStream(stream);
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.close();
+                }
+                alert(describeMicError(error));
             }
         }
         
@@ -2657,6 +2774,7 @@
         // 页面加载完成
         window.onload = () => {
             checkAuth();
+            updateMicrophoneHint();
             document.getElementById('loginPassword').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
             document.getElementById('registerPassword2').addEventListener('keydown', e => { if (e.key === 'Enter') doRegister(); });
         };
