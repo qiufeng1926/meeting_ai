@@ -224,7 +224,7 @@ async def _process_meeting_upload(
         logger.error(f"会议处理失败", exc_info=True, extra={'request_id': request_id, 'input_params': input_params, 'output_params': error_params, 'duration_ms': total_duration_ms})
         return {
             "success": False,
-            "error": f"处理失败: {str(e)}"
+            "error": "处理失败，请稍后重试",
         }
 
 

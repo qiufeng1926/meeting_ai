@@ -48,11 +48,9 @@ from config.config import (
 
     tingwu_source_language,
 
-    tingwu_transcription_output_level,
 
     tingwu_diarization_enabled,
-
-    tingwu_diarization_speaker_count,
+    get_tingwu_diarization_speaker_count,
 
 )
 
@@ -149,16 +147,13 @@ def _build_create_task_body(task_key: str) -> dict:
 
 
 def _build_transcription_params() -> dict:
+    # OutputLevel=2：仅推送句中中间结果，不再单独启用「仅完整句」模式
     transcription: dict = {
-        "OutputLevel": tingwu_transcription_output_level,
+        "OutputLevel": 2,
     }
     if tingwu_diarization_enabled:
         transcription["DiarizationEnabled"] = True
-        speaker_count = (
-            tingwu_diarization_speaker_count
-            if tingwu_diarization_speaker_count is not None
-            else 0
-        )
+        speaker_count = get_tingwu_diarization_speaker_count()
         transcription["Diarization"] = {"SpeakerCount": speaker_count}
     return transcription
 
@@ -491,7 +486,7 @@ class TingwuStreamingSession:
                 "output_params": {
                     "task_id": self.task_id,
                     "diarization_enabled": tingwu_diarization_enabled,
-                    "speaker_count": tingwu_diarization_speaker_count,
+                    "speaker_count": get_tingwu_diarization_speaker_count(),
                 }
             },
 

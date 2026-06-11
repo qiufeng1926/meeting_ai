@@ -106,12 +106,34 @@ tingwu_domain = _env("TINGWU_DOMAIN", "tingwu.cn-beijing.aliyuncs.com")
 tingwu_source_language = _env("TINGWU_SOURCE_LANGUAGE", "cn")
 tingwu_audio_format = _env("TINGWU_AUDIO_FORMAT", "pcm")
 tingwu_sample_rate = int(_env("TINGWU_SAMPLE_RATE", "16000") or "16000")
-tingwu_transcription_output_level = int(
-    _env("TINGWU_TRANSCRIPTION_OUTPUT_LEVEL", "2") or "2"
-)
 # 说话人分离（CreateTask Parameters.Transcription.DiarizationEnabled）
 tingwu_diarization_enabled = _env_bool("TINGWU_DIARIZATION_ENABLED", "true")
-_speaker_count_raw = _env("TINGWU_DIARIZATION_SPEAKER_COUNT", "0")
-tingwu_diarization_speaker_count: int | None = (
-    int(_speaker_count_raw) if _speaker_count_raw is not None and _speaker_count_raw != "" else None
-)
+TINGWU_SPEAKER_COUNT_ENV_KEY = "TINGWU_DIARIZATION_SPEAKER_COUNT"
+
+
+def get_tingwu_diarization_speaker_count() -> int:
+    """读取听悟说话人数量：0=自动识别，2-100=手动指定人数。"""
+    raw = _env(TINGWU_SPEAKER_COUNT_ENV_KEY, "0") or "0"
+    try:
+        return max(0, min(int(raw), 100))
+    except ValueError:
+        return 0
+
+
+def set_tingwu_diarization_speaker_count(count: int) -> int:
+    """更新内存与环境变量，并持久化到 .env。"""
+    import os as _os
+
+    from utils.env_file import update_env_value
+
+    normalized = max(0, min(int(count), 100))
+    value = str(normalized)
+    _os.environ[TINGWU_SPEAKER_COUNT_ENV_KEY] = value
+    update_env_value(TINGWU_SPEAKER_COUNT_ENV_KEY, value)
+    global tingwu_diarization_speaker_count
+    tingwu_diarization_speaker_count = normalized
+    return normalized
+
+
+_speaker_count_raw = _env(TINGWU_SPEAKER_COUNT_ENV_KEY, "0")
+tingwu_diarization_speaker_count: int = get_tingwu_diarization_speaker_count()

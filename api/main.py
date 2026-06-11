@@ -23,6 +23,7 @@ from api.routes.websocket import router as websocket_router
 from api.routes.auth import router as auth_router
 from api.routes.admin import router as admin_router
 from api.routes.export import router as export_router
+from api.routes.settings import router as settings_router
 
 
 @asynccontextmanager
@@ -99,6 +100,12 @@ app.include_router(
     websocket_router,
     prefix="/api",
     tags=["实时转写"]
+)
+
+app.include_router(
+    settings_router,
+    prefix="/api",
+    tags=["应用设置"]
 )
 
 

@@ -1050,9 +1050,156 @@
             gap: 8px;
             align-items: center;
         }
+
+        .error-alert-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 10000;
+            padding: 20px;
+        }
+
+        .error-alert-overlay.active {
+            display: flex;
+        }
+
+        @keyframes error-box-pop {
+            0% { transform: scale(0.85); opacity: 0; }
+            60% { transform: scale(1.03); opacity: 1; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        .error-alert-box {
+            background: white;
+            border-radius: 14px;
+            padding: 28px 32px 24px;
+            max-width: 420px;
+            width: 100%;
+            text-align: center;
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+            border-top: 4px solid #e74c3c;
+            animation: error-box-pop 0.35s ease-out;
+        }
+
+        .error-alert-icon {
+            font-size: 40px;
+            margin-bottom: 12px;
+            line-height: 1;
+        }
+
+        .error-alert-message {
+            color: #333;
+            font-size: 15px;
+            line-height: 1.6;
+            margin-bottom: 22px;
+            word-break: break-word;
+        }
+
+        .error-alert-btn {
+            padding: 10px 32px;
+            background: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .error-alert-btn:hover {
+            background: #c0392b;
+        }
+
+        .speaker-count-panel {
+            margin-top: 18px;
+            padding: 16px 18px;
+            background: #f8f9fc;
+            border: 1px solid #e8eaf0;
+            border-radius: 12px;
+        }
+
+        .speaker-count-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+
+        .speaker-count-title {
+            font-size: 14px;
+            font-weight: bold;
+            color: #555;
+        }
+
+        .speaker-count-status {
+            font-size: 12px;
+            color: #00897b;
+        }
+
+        .speaker-count-options {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .speaker-count-option {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 14px;
+            color: #444;
+            cursor: pointer;
+        }
+
+        .speaker-count-input {
+            width: 72px;
+            padding: 8px 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .speaker-count-input:disabled {
+            background: #f0f0f0;
+            color: #999;
+        }
+
+        .speaker-count-unit {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .speaker-count-hint {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #999;
+            line-height: 1.6;
+        }
+
+        .speaker-count-hint code {
+            font-size: 11px;
+            background: #eef0f5;
+            padding: 1px 5px;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
+    <!-- 错误提示弹窗 -->
+    <div id="errorAlertOverlay" class="error-alert-overlay" onclick="if(event.target===this) closeErrorAlert()">
+        <div class="error-alert-box" onclick="event.stopPropagation()">
+            <div class="error-alert-icon">⚠️</div>
+            <div id="errorAlertMessage" class="error-alert-message"></div>
+            <button type="button" class="error-alert-btn" onclick="closeErrorAlert()">确定</button>
+        </div>
+    </div>
+
     <!-- 登录/注册界面 -->
     <div id="authOverlay">
         <div class="auth-box">
@@ -1129,6 +1276,29 @@
             </div>
 
             <div id="micWarning" class="mic-warning" role="alert"></div>
+
+            <div class="speaker-count-panel">
+                <div class="speaker-count-header">
+                    <span class="speaker-count-title">👥 会议人数（说话人分离）<span style="color:#e74c3c;">*</span></span>
+                    <span id="speakerCountStatus" class="speaker-count-status"></span>
+                </div>
+                <div class="speaker-count-options">
+                    <label class="speaker-count-option">
+                        <input type="radio" name="speakerCountMode" value="auto" checked
+                               onchange="onSpeakerCountModeChange()">
+                        自动识别
+                    </label>
+                    <label class="speaker-count-option">
+                        <input type="radio" name="speakerCountMode" value="manual"
+                               onchange="onSpeakerCountModeChange()">
+                        手动设置
+                    </label>
+                    <input type="number" id="speakerCountInput" class="speaker-count-input"
+                           min="2" max="100" value="2" disabled placeholder="人数">
+                    <span class="speaker-count-unit">人</span>
+                </div>
+                <p class="speaker-count-hint">开始录音前请选择，用于区分不同发言人的语音。</p>
+            </div>
                     
             <div class="controls">
                 <button id="startBtn" class="btn-primary" onclick="startRecording()">
@@ -1140,11 +1310,8 @@
             </div>
                     
             <div class="result-container">
-                <div class="result-label">当前识别：</div>
-                <div id="currentText" class="current-text">等待录音...</div>
-                        
-                <div class="result-label">完整文本：</div>
-                <div id="totalText" class="total-text"></div>
+                <div class="result-label">实时转写：</div>
+                <div id="realtimeTranscript" class="total-text">等待录音...</div>
             </div>
                     
             <div id="realtimeSummary" class="summary-container" style="display: none;">
@@ -1414,6 +1581,22 @@
             document.getElementById('authError').textContent = '';
         }
 
+        function showErrorAlert(message) {
+            const msg = String(message || '发生未知错误').trim() || '发生未知错误';
+            document.getElementById('errorAlertMessage').textContent = msg;
+            document.getElementById('errorAlertOverlay').classList.add('active');
+        }
+
+        function closeErrorAlert() {
+            document.getElementById('errorAlertOverlay').classList.remove('active');
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && document.getElementById('errorAlertOverlay').classList.contains('active')) {
+                closeErrorAlert();
+            }
+        });
+
         function showAuthError(msg) {
             document.getElementById('authError').textContent = msg;
         }
@@ -1434,6 +1617,106 @@
             document.getElementById('mainApp').style.display = 'block';
             updateUserBar();
             updateAccountPanel();
+            loadSpeakerCountSetting();
+        }
+
+        function onSpeakerCountModeChange() {
+            const manual = document.querySelector('input[name="speakerCountMode"]:checked')?.value === 'manual';
+            const input = document.getElementById('speakerCountInput');
+            if (input) {
+                input.disabled = !manual;
+                if (manual && (!input.value || parseInt(input.value, 10) < 2)) {
+                    input.value = '2';
+                }
+            }
+        }
+
+        function updateSpeakerCountStatusText(mode, count) {
+            const el = document.getElementById('speakerCountStatus');
+            if (!el) return;
+            if (mode === 'auto') {
+                el.textContent = '当前：自动识别';
+            } else {
+                el.textContent = `当前：手动 ${count} 人`;
+            }
+        }
+
+        async function loadSpeakerCountSetting() {
+            if (!authToken) return;
+            try {
+                const resp = await authFetch('/api/settings/tingwu-speaker-count');
+                const data = await resp.json();
+                if (!resp.ok) return;
+                const mode = data.mode || 'auto';
+                const count = data.speaker_count || 0;
+                const autoRadio = document.querySelector('input[name="speakerCountMode"][value="auto"]');
+                const manualRadio = document.querySelector('input[name="speakerCountMode"][value="manual"]');
+                if (mode === 'manual') {
+                    if (manualRadio) manualRadio.checked = true;
+                    const input = document.getElementById('speakerCountInput');
+                    if (input) input.value = String(Math.max(2, count));
+                } else if (autoRadio) {
+                    autoRadio.checked = true;
+                }
+                onSpeakerCountModeChange();
+                updateSpeakerCountStatusText(mode, count);
+            } catch (e) {
+                console.warn('加载会议人数设置失败', e);
+            }
+        }
+
+        function validateSpeakerCountSetting() {
+            const mode = document.querySelector('input[name="speakerCountMode"]:checked')?.value;
+            if (!mode) {
+                showErrorAlert('请选择会议人数');
+                return false;
+            }
+            if (mode === 'manual') {
+                const speakerCount = parseInt(document.getElementById('speakerCountInput').value, 10);
+                if (!speakerCount || speakerCount < 2) {
+                    showErrorAlert('手动设置时会议人数至少为 2 人');
+                    document.getElementById('speakerCountInput').focus();
+                    return false;
+                }
+                if (speakerCount > 100) {
+                    showErrorAlert('会议人数不能超过 100 人');
+                    document.getElementById('speakerCountInput').focus();
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        async function persistSpeakerCountSetting() {
+            if (!authToken) {
+                showErrorAlert('请先登录');
+                return false;
+            }
+            if (!validateSpeakerCountSetting()) {
+                return false;
+            }
+            const mode = document.querySelector('input[name="speakerCountMode"]:checked').value;
+            let speakerCount = 0;
+            if (mode === 'manual') {
+                speakerCount = parseInt(document.getElementById('speakerCountInput').value, 10);
+            }
+            try {
+                const resp = await authFetch('/api/settings/tingwu-speaker-count', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode, speaker_count: speakerCount }),
+                });
+                const data = await resp.json();
+                if (!resp.ok) {
+                    showErrorAlert(data.detail || '会议人数设置失败');
+                    return false;
+                }
+                updateSpeakerCountStatusText(data.mode, data.speaker_count);
+                return true;
+            } catch (e) {
+                showErrorAlert('会议人数设置失败，请稍后重试');
+                return false;
+            }
         }
 
         function showAuthOverlay() {
@@ -1812,13 +2095,13 @@
                     body: JSON.stringify({ request_type, reason })
                 });
                 const data = await resp.json();
-                if (!resp.ok) { alert(data.detail || '提交失败'); return; }
+                if (!resp.ok) { showErrorAlert(data.detail || '提交失败'); return; }
                 alert('申请已提交，请等待审批');
                 document.getElementById('applyReason').value = '';
                 loadMyRequests();
                 if (currentUser.role === 'admin' || currentUser.role === 'root') loadPendingRequests();
             } catch (e) {
-                alert(e.message);
+                showErrorAlert('提交失败，请稍后重试');
             }
         }
 
@@ -2117,12 +2400,12 @@
                     body: JSON.stringify(body),
                 });
                 const data = await resp.json();
-                if (!resp.ok) { alert(data.detail || '保存失败'); return; }
+                if (!resp.ok) { showErrorAlert(data.detail || '保存失败'); return; }
                 alert('下载权限已更新');
                 hideAdminPermPanels(userId);
                 loadAdminUsers();
             } catch (e) {
-                alert(e.message);
+                showErrorAlert('操作失败，请稍后重试');
             }
         }
 
@@ -2137,7 +2420,7 @@
                 const el = document.getElementById('adminCanViewRoot_' + userId);
                 body.can_view_root_meetings = el && el.value === '1';
             } else {
-                alert('该用户无需设置查阅会议权限');
+                showErrorAlert('该用户无需设置查阅会议权限');
                 return;
             }
             try {
@@ -2147,17 +2430,17 @@
                     body: JSON.stringify(body)
                 });
                 const data = await resp.json();
-                if (!resp.ok) { alert(data.detail || '保存失败'); return; }
+                if (!resp.ok) { showErrorAlert(data.detail || '保存失败'); return; }
                 alert('查阅会议权限已更新');
                 loadAdminUsers();
-            } catch (e) { alert(e.message); }
+            } catch (e) { showErrorAlert('操作失败，请稍后重试'); }
         }
 
         async function saveAdminAccountPerm(userId) {
             const nicknameEl = document.getElementById('adminNickname_' + userId);
             const roleEl = document.getElementById('adminRole_' + userId);
             const nickname = nicknameEl.value.trim();
-            if (!nickname) { alert('昵称不能为空'); return; }
+            if (!nickname) { showErrorAlert('昵称不能为空'); return; }
             const role = roleEl.value;
             try {
                 const resp = await authFetch(`/api/admin/users/${userId}`, {
@@ -2166,17 +2449,17 @@
                     body: JSON.stringify({ nickname, role })
                 });
                 const data = await resp.json();
-                if (!resp.ok) { alert(data.detail || '保存失败'); return; }
+                if (!resp.ok) { showErrorAlert(data.detail || '保存失败'); return; }
                 alert('账号权限已更新');
                 loadAdminUsers();
-            } catch (e) { alert(e.message); }
+            } catch (e) { showErrorAlert('操作失败，请稍后重试'); }
         }
 
         async function saveAdminResetPassword(userId) {
             const pwd = document.getElementById('adminNewPwd_' + userId).value;
             const pwd2 = document.getElementById('adminNewPwd2_' + userId).value;
-            if (!pwd || pwd.length < 6) { alert('密码至少 6 位'); return; }
-            if (pwd !== pwd2) { alert('两次密码不一致'); return; }
+            if (!pwd || pwd.length < 6) { showErrorAlert('密码至少 6 位'); return; }
+            if (pwd !== pwd2) { showErrorAlert('两次密码不一致'); return; }
             try {
                 const resp = await authFetch(`/api/admin/users/${userId}/reset-password`, {
                     method: 'POST',
@@ -2184,10 +2467,10 @@
                     body: JSON.stringify({ new_password: pwd })
                 });
                 const data = await resp.json();
-                if (!resp.ok) { alert(data.detail || '操作失败'); return; }
+                if (!resp.ok) { showErrorAlert(data.detail || '操作失败'); return; }
                 alert(data.message || '密码已重置');
                 hideAdminPermPanels(userId);
-            } catch (e) { alert(e.message); }
+            } catch (e) { showErrorAlert('操作失败，请稍后重试'); }
         }
 
         async function adminDeleteUser(userId, username) {
@@ -2195,10 +2478,10 @@
             try {
                 const resp = await authFetch(`/api/admin/users/${userId}`, { method: 'DELETE' });
                 const data = await resp.json();
-                if (!resp.ok) { alert(data.detail || '删除失败'); return; }
+                if (!resp.ok) { showErrorAlert(data.detail || '删除失败'); return; }
                 alert(data.message || '已删除');
                 loadAdminUsers();
-            } catch (e) { alert(e.message); }
+            } catch (e) { showErrorAlert('操作失败，请稍后重试'); }
         }
 
         async function adminDeleteMeeting(fileId, displayName) {
@@ -2207,10 +2490,10 @@
             try {
                 const resp = await authFetch(`/api/admin/meetings/${fileId}`, { method: 'DELETE' });
                 const data = await resp.json();
-                if (!resp.ok) { alert(data.detail || '删除失败'); return; }
+                if (!resp.ok) { showErrorAlert(data.detail || '删除失败'); return; }
                 alert(data.message || '已删除');
                 loadHistory();
-            } catch (e) { alert(e.message); }
+            } catch (e) { showErrorAlert('操作失败，请稍后重试'); }
         }
 
         async function reviewRequest(id, action) {
@@ -2222,7 +2505,7 @@
                     body: JSON.stringify({ action, review_note })
                 });
                 const data = await resp.json();
-                if (!resp.ok) { alert(data.detail || '操作失败'); return; }
+                if (!resp.ok) { showErrorAlert(data.detail || '操作失败'); return; }
                 alert(action === 'approve' ? '已通过' : '已拒绝');
                 loadPendingRequests();
                 loadMyRequests();
@@ -2230,7 +2513,7 @@
                 const meData = await meResp.json();
                 if (meData.success) { currentUser = meData.user; updateUserBar(); updateAccountPanel(); }
             } catch (e) {
-                alert(e.message);
+                showErrorAlert('操作失败，请稍后重试');
             }
         }
 
@@ -2255,12 +2538,12 @@
 
         async function exportSummaryDocx({ fileId, content, title }) {
             if (!userCanDownload()) {
-                alert('暂无下载/导出权限，请在「账户管理」中申请');
+                showErrorAlert('暂无下载/导出权限，请在「账户管理」中申请');
                 return;
             }
             const exportTitle = (title || '').trim();
             if (!fileId && !exportTitle) {
-                alert('请先填写会议名称');
+                showErrorAlert('请先填写会议名称');
                 return;
             }
             try {
@@ -2274,28 +2557,28 @@
                         body: JSON.stringify({ content, title: exportTitle }),
                     });
                 } else {
-                    alert('无可导出的总结');
+                    showErrorAlert('无可导出的总结');
                     return;
                 }
                 if (!response.ok) {
                     const err = await response.json().catch(() => ({}));
-                    alert(err.detail || '导出失败');
+                    showErrorAlert(err.detail || '导出失败');
                     return;
                 }
                 await downloadBlobResponse(response, 'AI智能速览.docx');
             } catch (e) {
-                alert('导出失败: ' + e.message);
+                showErrorAlert('导出失败，请稍后重试');
             }
         }
 
         async function exportVisualHtml({ fileId, visual, title, format = 'html' }) {
             if (!userCanDownload()) {
-                alert('暂无下载/导出权限，请在「账户管理」中申请');
+                showErrorAlert('暂无下载/导出权限，请在「账户管理」中申请');
                 return;
             }
             const exportTitle = (title || '').trim();
             if (!fileId && !exportTitle) {
-                alert('请先填写会议名称');
+                showErrorAlert('请先填写会议名称');
                 return;
             }
             try {
@@ -2310,18 +2593,18 @@
                         body: JSON.stringify({ visual, title: exportTitle }),
                     });
                 } else {
-                    alert('无可下载的图文速览');
+                    showErrorAlert('无可下载的图文速览');
                     return;
                 }
                 if (!response.ok) {
                     const err = await response.json().catch(() => ({}));
-                    alert(err.detail || '下载失败');
+                    showErrorAlert(err.detail || '下载失败');
                     return;
                 }
                 const defaultName = fmt === 'json' ? '图文速览.json' : '图文速览.html';
                 await downloadBlobResponse(response, defaultName);
             } catch (e) {
-                alert('下载失败: ' + e.message);
+                showErrorAlert('下载失败，请稍后重试');
             }
         }
 
@@ -2331,7 +2614,7 @@
                 const content = (mdEl ? mdEl.textContent : '').trim();
                 const meetingName = document.getElementById('meetingNameInput').value.trim();
                 if (!meetingName && !lastRealtimeFileId) {
-                    alert('请先填写会议名称');
+                    showErrorAlert('请先填写会议名称');
                     return;
                 }
                 exportSummaryDocx({
@@ -2354,7 +2637,7 @@
             if (source === 'realtime') {
                 const meetingName = document.getElementById('meetingNameInput').value.trim();
                 if (!meetingName && !lastRealtimeFileId) {
-                    alert('请先填写会议名称');
+                    showErrorAlert('请先填写会议名称');
                     return;
                 }
                 exportVisualHtml({
@@ -2401,34 +2684,26 @@
         const micWarningEl = document.getElementById('micWarning');
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
-        const currentTextEl = document.getElementById('currentText');
-        const totalTextEl = document.getElementById('totalText');
-
-        function isLocalhostHost(hostname) {
-            return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
-        }
+        const realtimeTranscriptEl = document.getElementById('realtimeTranscript');
 
         function canUseMicrophone() {
             if (window.location.protocol === 'file:') {
                 return {
                     ok: false,
-                    reason: '请通过服务器地址打开页面（如 http://localhost:8000），不要直接双击 HTML 文件。',
+                    reason: '请通过浏览器访问本系统页面，不要直接双击打开 HTML 文件。',
                 };
             }
             if (!window.isSecureContext) {
-                const host = window.location.host;
                 return {
                     ok: false,
                     reason:
-                        `当前地址 <code>${host}</code> 不是浏览器认可的安全环境，无法调用麦克风。` +
-                        '请改用 <code>https://</code> 访问，或在同一台电脑上使用 ' +
-                        '<code>http://localhost:8000</code> / <code>http://127.0.0.1:8000</code>。',
+                        '当前访问方式无法调用麦克风。请使用安全连接（HTTPS）访问本系统，或联系管理员获取正确访问地址。',
                 };
             }
             if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
                 return {
                     ok: false,
-                    reason: '当前浏览器不支持麦克风 API，请使用 Chrome、Edge 或 Firefox 最新版。',
+                    reason: '当前浏览器不支持麦克风，请使用 Chrome、Edge 或 Firefox 最新版。',
                 };
             }
             return { ok: true };
@@ -2447,12 +2722,12 @@
                 return '麦克风被其他应用占用或驱动异常，请关闭占用麦克风的程序后重试。';
             }
             if (name === 'SecurityError') {
-                return '浏览器安全策略阻止了麦克风访问。请使用 https:// 或 http://localhost 打开本页。';
+                return '浏览器安全策略阻止了麦克风访问，请使用安全连接（HTTPS）访问本系统。';
             }
             if (name === 'OverconstrainedError') {
                 return '麦克风参数不兼容，请尝试更换浏览器或检查系统录音设备。';
             }
-            return `无法访问麦克风：${msg || name || '未知错误'}`;
+            return '无法访问麦克风，请检查权限与设备后重试。';
         }
 
         function stopMediaStream(stream) {
@@ -2536,7 +2811,7 @@
                 updateStatus('已断开', false);
                 cleanupMediaOnly();
                 if (sessionEnding && pendingFileId) {
-                    currentTextEl.textContent = '连接已断开，正在从服务器获取会议纪要...';
+                    setRealtimeTranscriptStatus('连接已断开，正在获取会议纪要...');
                     pollMeetingSummary(pendingFileId);
                 } else if (sessionEnding) {
                     resetRealtimeSessionUI('连接已断开，请查看历史记录');
@@ -2551,7 +2826,7 @@
             stopBtn.disabled = false;
             stopBtn.innerHTML = '停止录音';
             if (statusText) {
-                currentTextEl.textContent = statusText;
+                setRealtimeTranscriptStatus(statusText);
             }
         }
 
@@ -2803,9 +3078,10 @@
             }
 
             if (data.total_text) {
-                renderTotalText(data.total_text);
+                renderRealtimeTranscript(data.total_text);
+            } else {
+                setRealtimeTranscriptStatus('会话已结束');
             }
-            currentTextEl.textContent = '会话已结束';
 
             displayDualSummary('realtime', data);
             if (data.file_id) {
@@ -2817,7 +3093,7 @@
             stopBtn.innerHTML = '停止录音';
 
             if (data.error) {
-                alert('警告: ' + data.error);
+                showErrorAlert(data.error || '部分功能未完成，请稍后重试');
             }
             if (data.summary_visual_status === 'failed' && data.summary_visual_error) {
                 console.warn('图文速览:', data.summary_visual_error);
@@ -2874,14 +3150,14 @@
                     resolve();
                     return;
                 }
-                const timer = setTimeout(() => reject(new Error('WebSocket 连接超时')), timeoutMs);
+                const timer = setTimeout(() => reject(new Error('连接超时，请重试')), timeoutMs);
                 socket.addEventListener('open', () => {
                     clearTimeout(timer);
                     resolve();
                 }, { once: true });
                 socket.addEventListener('error', () => {
                     clearTimeout(timer);
-                    reject(new Error('WebSocket 连接失败'));
+                    reject(new Error('连接失败，请重试'));
                 }, { once: true });
             });
         }
@@ -2912,29 +3188,27 @@
             return html;
         }
 
-        function renderCurrentText(data) {
-            const label = data.speaker_label;
-            const body = stripSpeakerPrefix(data.text || '');
-            if (label) {
-                currentTextEl.innerHTML =
-                    `<span class="speaker-badge">${escapeHtml(label)}</span>` +
-                    `<span class="current-fragment">${escapeHtml(body)}</span>`;
-            } else if (body) {
-                currentTextEl.textContent = body;
-            }
+        function setRealtimeTranscriptStatus(text) {
+            realtimeTranscriptEl.textContent = text || '';
+            realtimeTranscriptEl.style.whiteSpace = 'pre-wrap';
         }
 
-        function renderTotalText(text) {
-            if (!text) {
-                totalTextEl.textContent = '';
+        function renderRealtimeTranscript(completedText, partialText = '', partialSpeakerLabel = '') {
+            if (!completedText && !partialText) {
+                realtimeTranscriptEl.textContent = '';
                 return;
             }
-            if (/\[说话人\d+\]/.test(text)) {
-                totalTextEl.innerHTML = renderTranscriptHtml(text);
-            } else {
-                totalTextEl.textContent = text;
+            let html = completedText ? renderTranscriptHtml(completedText) : '';
+            const body = stripSpeakerPrefix(partialText || '');
+            if (body) {
+                if (partialSpeakerLabel) {
+                    html += `<div class="speaker-line"><span class="speaker-badge">${escapeHtml(partialSpeakerLabel)}</span><span class="line-text current-fragment">${escapeHtml(body)}</span></div>`;
+                } else {
+                    html += `<div class="speaker-line"><span class="line-text current-fragment">${escapeHtml(body)}</span></div>`;
+                }
             }
-            totalTextEl.style.whiteSpace = 'pre-wrap';
+            realtimeTranscriptEl.innerHTML = html;
+            realtimeTranscriptEl.style.whiteSpace = 'pre-wrap';
         }
 
         // 处理 WebSocket 消息
@@ -2942,11 +3216,14 @@
             console.log('收到消息:', data);
             
             if (data.type === 'result') {
-                if (data.text) {
-                    renderCurrentText(data);
-                }
-                if (data.total_text) {
-                    renderTotalText(data.total_text);
+                if (data.is_partial) {
+                    renderRealtimeTranscript(
+                        data.total_text || '',
+                        data.text || '',
+                        data.speaker_label || ''
+                    );
+                } else {
+                    renderRealtimeTranscript(data.total_text || '');
                 }
             } else if (data.type === 'transcribe_complete') {
                 if (data.file_id) {
@@ -2954,14 +3231,14 @@
                     lastRealtimeFileId = data.file_id;
                 }
                 if (data.total_text) {
-                    renderTotalText(data.total_text);
+                    renderRealtimeTranscript(data.total_text);
                 }
-                currentTextEl.textContent = '转写完成，正在生成文字与图文速览...';
+                setRealtimeTranscriptStatus('转写完成，正在生成文字与图文速览...');
             } else if (data.type === 'generating_summary') {
                 if (data.file_id) {
                     pendingFileId = data.file_id;
                 }
-                currentTextEl.textContent = data.message || '正在生成文字与图文速览...';
+                setRealtimeTranscriptStatus(data.message || '正在生成文字与图文速览...');
                 stopBtn.disabled = true;
                 stopBtn.innerHTML = '<span class="loading"></span>生成中...';
                 // 兜底：WebSocket 长时间无响应时通过 HTTP 拉取结果
@@ -2981,7 +3258,7 @@
                     ws.close();
                 }
             } else if (data.type === 'error') {
-                alert('错误: ' + data.message);
+                showErrorAlert(data.message || '转写出现问题，请稍后重试');
             }
         }
         
@@ -3036,13 +3313,13 @@
             try {
                 if (!authToken) {
                     showAuthOverlay();
-                    alert('请先登录后再开始录音');
+                    showErrorAlert('请先登录后再开始录音');
                     return;
                 }
 
                 const micCheck = canUseMicrophone();
                 if (!micCheck.ok) {
-                    alert(micCheck.reason.replace(/<[^>]+>/g, ''));
+                    showErrorAlert(micCheck.reason.replace(/<[^>]+>/g, ''));
                     updateMicrophoneHint();
                     return;
                 }
@@ -3061,13 +3338,17 @@
                 if (rtVis) rtVis.innerHTML = '';
                 lastRealtimeVisual = null;
                 lastRealtimeFileId = null;
-                totalTextEl.textContent = '';
+                setRealtimeTranscriptStatus('');
 
                 // 获取会议名称（必填）
                 const meetingName = document.getElementById('meetingNameInput').value.trim();
                 if (!meetingName) {
-                    alert('请先填写会议名称');
+                    showErrorAlert('请先填写会议名称');
                     document.getElementById('meetingNameInput').focus();
+                    return;
+                }
+
+                if (!await persistSpeakerCountSetting()) {
                     return;
                 }
 
@@ -3139,7 +3420,7 @@
                 
                 startBtn.disabled = true;
                 stopBtn.disabled = false;
-                currentTextEl.textContent = '正在录音...';
+                setRealtimeTranscriptStatus('正在录音...');
                 
                 console.log('开始录音');
                 
@@ -3149,7 +3430,7 @@
                 if (ws && ws.readyState === WebSocket.OPEN) {
                     ws.close();
                 }
-                alert(describeMicError(error));
+                showErrorAlert(describeMicError(error));
             }
         }
         
@@ -3178,12 +3459,12 @@
                 ws.send(JSON.stringify({ type: 'end' }));
                 stopBtn.disabled = true;
                 stopBtn.innerHTML = '<span class="loading"></span>生成中...';
-                currentTextEl.textContent = '正在生成会议纪要，请稍候...';
+                setRealtimeTranscriptStatus('正在生成会议纪要，请稍候...');
                 // 保持连接直到收到 session_end，不在此处关闭 WebSocket
             } else {
                 startBtn.disabled = false;
                 stopBtn.disabled = true;
-                currentTextEl.textContent = '录音已停止';
+                setRealtimeTranscriptStatus('录音已停止');
             }
             
             console.log('停止录音');
@@ -3245,7 +3526,7 @@
         // 上传文件
         async function uploadFile() {
             if (!selectedFile) {
-                alert('请先选择文件');
+                showErrorAlert('请先选择文件');
                 return;
             }
             
@@ -3258,7 +3539,7 @@
             // 获取会议名称（必填）
             const meetingName = document.getElementById('batchMeetingNameInput').value.trim();
             if (!meetingName) {
-                alert('请先填写会议名称');
+                showErrorAlert('请先填写会议名称');
                 document.getElementById('batchMeetingNameInput').focus();
                 return;
             }
@@ -3306,14 +3587,14 @@
                     }, 2000);
                     
                 } else {
-                    alert('处理失败: ' + (result.error || '未知错误'));
+                    showErrorAlert(result.error || '处理失败，请稍后重试');
                     uploadBtn.disabled = false;
                     uploadBtn.innerHTML = '开始处理';
                 }
                 
             } catch (error) {
                 console.error('上传失败:', error);
-                alert('上传失败: ' + error.message);
+                showErrorAlert('上传失败，请稍后重试');
                 uploadBtn.disabled = false;
                 uploadBtn.innerHTML = '开始处理';
             } finally {

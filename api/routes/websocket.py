@@ -154,7 +154,8 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
         payload = {
             "type": "result",
             "text": display_text,
-            "total_text": total_text if is_sentence_end else session_info["total_text"],
+            "total_text": session_info["total_text"],
+            "is_partial": not is_sentence_end,
             "timestamp": datetime.now().isoformat(),
         }
         if speaker_id is not None:
@@ -167,7 +168,7 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
         session_info["tingwu_failed"] = True
         await manager.send_json(connection_id, {
             "type": "error",
-            "message": f"听悟转写失败: {error_message}",
+            "message": "实时转写失败，请稍后重试",
         })
 
     transcriber = tingwu_engine.create_streaming_session(
@@ -192,7 +193,7 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
             )
             await manager.send_json(connection_id, {
                 "type": "tingwu_ready",
-                "message": "听悟转写通道已就绪",
+                "message": "转写通道已就绪",
             })
 
     try:
@@ -436,7 +437,7 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
                         end_result = {
                             "type": "session_end",
                             "summary": None,
-                            "error": f"生成总结失败: {str(e)}",
+                            "error": "会议纪要生成失败，请稍后重试",
                             **end_result_base,
                         }
                         await manager.send_json(connection_id, end_result)
@@ -468,7 +469,7 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
         )
         await manager.send_json(connection_id, {
             "type": "error",
-            "message": str(e),
+            "message": "实时转写失败，请稍后重试",
         })
     except Exception as e:
         duration_ms = (time.time() - start_time) * 1000
@@ -476,7 +477,7 @@ async def websocket_transcribe(websocket: WebSocket, token: str = Query(default=
         if not getattr(session_info.get("transcriber"), "task_id", None):
             await manager.send_json(connection_id, {
                 "type": "error",
-                "message": f"听悟实时转写启动失败: {e}",
+                "message": "实时转写启动失败，请稍后重试",
             })
     finally:
         transcriber = session_info.get("transcriber")
@@ -557,7 +558,7 @@ async def list_meetings(
         logger.error(f"获取会议列表失败", exc_info=True, extra={'request_id': request_id, 'output_params': error_params, 'duration_ms': duration_ms})
         return {
             "success": False,
-            "error": str(e)
+            "error": "加载会议列表失败，请稍后重试",
         }
 
 
@@ -675,7 +676,7 @@ async def get_meeting(file_id: str, current_user: User = Depends(get_current_use
         logger.error(f"获取会议详情失败", exc_info=True, extra={'request_id': request_id, 'input_params': input_params, 'output_params': error_params, 'duration_ms': duration_ms})
         return {
             "success": False,
-            "error": str(e)
+            "error": "加载会议详情失败，请稍后重试",
         }
 
 
